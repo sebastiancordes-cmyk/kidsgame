@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Magisches Abenteuer – Spielauswahl</title>
+<style>
+  html,body{ margin:0; min-height:100%; background:linear-gradient(160deg,#d9c8ff,#ffe3f4 60%,#cdeeff);
+    font-family:ui-rounded,"SF Pro Rounded","Baloo 2","Comic Sans MS",system-ui,sans-serif; color:#5a3f78; }
+  .wrap{ max-width:760px; margin:0 auto; padding:40px 20px 60px; text-align:center; }
+  h1{ font-size:clamp(28px,7vw,46px); margin:8px 0 4px; }
+  .sub{ font-size:clamp(15px,3.4vw,19px); color:#7a5f9c; margin-bottom:28px; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:18px; }
+  a.card{ display:block; text-decoration:none; color:#fff; border-radius:26px; padding:26px 22px;
+    box-shadow:0 14px 34px rgba(120,90,170,0.35), inset 0 2px 0 rgba(255,255,255,0.4); transition:transform .15s ease; }
+  a.card:active{ transform:translateY(3px); }
+  a.card:hover{ transform:translateY(-4px); }
+  .emoji{ font-size:54px; display:block; margin-bottom:8px; }
+  .name{ font-size:clamp(20px,4vw,26px); font-weight:800; }
+  .desc{ font-size:14px; opacity:0.95; margin-top:6px; font-weight:600; }
+  .space{ background:linear-gradient(150deg,#5b4d96,#b06f9e); }
+  .meadow{ background:linear-gradient(150deg,#6fb1e0,#7bd88f); }
+  .classic{ background:linear-gradient(150deg,#ff9ecf,#c4b0e6); }
+  .foot{ margin-top:30px; font-size:13px; color:#8a6fb3; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>✨ Magisches Abenteuer ✨</h1>
+  <div class="sub">Wähle ein Spiel</div>
+  <div class="grid">
+    <a class="card space" href="flieger-mockup.html">
+      <span class="emoji">🐉</span><div class="name">Sternenflug</div>
+      <div class="desc">Drache · tippen &amp; halten zum Fliegen</div>
+    </a>
+    <a class="card meadow" href="einhorn-springer.html">
+      <span class="emoji">🦄</span><div class="name">Klippenspringer</div>
+      <div class="desc">Einhorn · hüpfen &amp; ducken</div>
+    </a>
+    <a class="card classic" href="spiel.html">
+      <span class="emoji">🌼</span><div class="name">Sammel-Welten</div>
+      <div class="desc">Figur &amp; Welt wählen · mit Einstellungen</div>
+    </a>
+  </div>
+  <div class="foot">Tipp: Am besten im Vollbild-Browser auf dem Tablet spielen.</div>
+</div>
+</body>
+</html>

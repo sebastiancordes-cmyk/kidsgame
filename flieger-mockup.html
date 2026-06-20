@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Drache – Flieger (Mockup)</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; background:#1a1240;
+    font-family: ui-rounded, "SF Pro Rounded", "Baloo 2", "Comic Sans MS", system-ui, sans-serif;
+    -webkit-user-select:none; user-select:none; touch-action:none; -webkit-tap-highlight-color:transparent; }
+  #game { display:block; width:100vw; height:100vh; }
+  .overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; padding:20px; box-sizing:border-box; }
+  .card { background:linear-gradient(135deg, rgba(60,40,110,0.55), rgba(120,80,180,0.35));
+    border:1.5px solid rgba(255,255,255,0.25); border-radius:28px; padding:26px 30px; max-width:460px; width:100%;
+    color:#fff; backdrop-filter:blur(14px) saturate(140%); -webkit-backdrop-filter:blur(14px) saturate(140%);
+    box-shadow:0 20px 60px rgba(0,0,0,0.45); animation:pop .45s cubic-bezier(.2,.9,.3,1.3); }
+  @keyframes pop { 0%{transform:scale(.8);opacity:0} 100%{transform:scale(1);opacity:1} }
+  h1 { margin:0 0 8px; font-size:clamp(26px,6vw,40px); }
+  p { margin:8px 0; font-size:clamp(15px,3.4vw,19px); color:#e9e2ff; line-height:1.45; }
+  button { margin-top:18px; font-family:inherit; font-size:clamp(19px,4vw,24px); color:#3a1f5c; font-weight:800;
+    background:linear-gradient(180deg,#ffe7a0,#ffc04d); border:none; border-radius:999px; padding:15px 38px;
+    box-shadow:0 8px 22px rgba(255,170,40,0.5), inset 0 2px 0 rgba(255,255,255,0.6); cursor:pointer; }
+  button:active { transform:translateY(3px); }
+  .hidden { display:none !important; }
+  #hud { position:fixed; top:14px; left:16px; right:16px; z-index:4; color:#fff; display:flex; gap:14px; align-items:center;
+    font-weight:800; font-size:20px; text-shadow:0 2px 8px rgba(0,0,0,0.5); pointer-events:none; }
+  #hud .chip { background:rgba(30,20,60,0.4); border:1px solid rgba(255,255,255,0.18); border-radius:16px; padding:7px 14px; backdrop-filter:blur(8px); }
+  #lives { margin-left:auto; font-size:24px; letter-spacing:2px; }
+  #backBtn { position:fixed; bottom:14px; right:16px; z-index:6; text-decoration:none; color:#fff; font-weight:800;
+    background:rgba(30,20,60,0.45); border:1px solid rgba(255,255,255,0.25); border-radius:16px; padding:8px 14px;
+    font-size:16px; backdrop-filter:blur(8px); }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud" class="hidden">
+  <div class="chip">⭐ <span id="score">0</span></div>
+  <div class="chip">🌍 Welt <span id="welt">1</span></div>
+  <div id="lives" class="chip">❤️❤️❤️</div>
+</div>
+<a id="backBtn" href="index.html" class="hidden">≡ Menü</a>
+
+<div id="startScreen" class="overlay">
+  <div class="card">
+    <h1>🐉 Sternenflug</h1>
+    <p><b>Tippen &amp; halten</b> = der Drache steigt.<br>Loslassen = er gleitet hinab.</p>
+    <p>Sammle ⭐ Sterne und weiche Felsen &amp; dem Schatten aus. Du hast <b>3 Leben</b> – selten taucht ein ❤️ auf!</p>
+    <button id="startBtn">▶ Losfliegen</button>
+  </div>
+</div>
+
+<div id="overScreen" class="overlay hidden">
+  <div class="card">
+    <h1>💫 Gut geflogen!</h1>
+    <p id="overText"></p>
+    <button id="restartBtn">▶ Nochmal</button>
+    <a href="index.html" style="display:block;margin-top:12px;color:#ffe7a0;font-weight:700;text-decoration:none;font-size:17px;">≡ Zur Spielauswahl</a>
+  </div>
+</div>
+
+<script>
+"use strict";
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+let W=0, H=0, DPR=1, grain=null;
+
+function makeGrain(){
+  try {
+    const c = document.createElement("canvas"); c.width=140; c.height=140;
+    const g = c.getContext("2d"); const id = g.createImageData(140,140);
+    for (let i=0;i<id.data.length;i+=4){ const v=210+Math.random()*45; id.data[i]=id.data[i+1]=id.data[i+2]=v; id.data[i+3]=Math.random()*16; }
+    g.putImageData(id,0,0); grain = ctx.createPattern(c,"repeat");
+  } catch(e){ grain = null; }
+}
+function resize(){
+  DPR = Math.min(window.devicePixelRatio||1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width=W*DPR; canvas.height=H*DPR; canvas.style.width=W+"px"; canvas.style.height=H+"px";
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  makeGrain(); buildParallax();
+}
+function rand(a,b){ return a+Math.random()*(b-a); }
+function dist(ax,ay,bx,by){ return Math.hypot(ax-bx,ay-by); }
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+
+/* ---------- Parallax-Ebenen ---------- */
+let sternFern=[], nebel=[], planeten=[], kristalle=[];
+function buildParallax(){
+  sternFern=[]; for(let i=0;i<90;i++) sternFern.push({x:rand(0,W),y:rand(0,H),r:rand(0.5,1.8),tw:rand(0,6.28),sp:rand(0.15,0.5)});
+  nebel=[]; for(let i=0;i<4;i++) nebel.push({x:rand(0,W),y:rand(0,H*0.8),r:rand(160,300),sp:rand(0.2,0.5),
+    c:["rgba(255,140,210,0.10)","rgba(120,150,255,0.12)","rgba(180,120,255,0.10)","rgba(120,230,255,0.08)"][i%4]});
+  planeten=[]; for(let i=0;i<2;i++) planeten.push({x:rand(W*0.4,W*1.4),y:rand(H*0.18,H*0.6),r:rand(38,80),sp:rand(0.6,0.9),hue:rand(0,360)});
+  kristalle=[]; for(let i=0;i<5;i++) kristalle.push({x:rand(0,W*1.4),y:H-rand(0,40),h:rand(40,120),sp:1.4});
+}
+
+/* ---------- Spielzustand ---------- */
+let state="start";
+let drache, sterne, felsen, herzen, schatten, partikel, score, welt, lives, scroll, vy, thrust, hitFlash, weltFlash;
+function reset(){
+  drache={x:W*0.30, y:H*0.5, rot:0, flap:0};
+  vy=0; thrust=false; sterne=[]; felsen=[]; herzen=[]; schatten=null; partikel=[];
+  score=0; welt=1; lives=3; scroll=0; hitFlash=0; weltFlash=0;
+  spawnTimerS=0; spawnTimerF=0; schattenTimer=420; herzTimer=600;
+  document.getElementById("score").textContent="0";
+  document.getElementById("welt").textContent="1";
+  setLivesHUD();
+}
+function setLivesHUD(){ document.getElementById("lives").textContent="❤️".repeat(Math.max(0,lives))+"🖤".repeat(Math.max(0,3-lives)); }
+let spawnTimerS=0, spawnTimerF=0, schattenTimer=420, herzTimer=600, invuln=0;
+
+/* ---------- Physik-Konstanten (gerne anpassen) ---------- */
+const GRAV=0.42, THRUST=0.95, VYMIN=-8.5, VYMAX=10, SPEED0=3.4;
+
+/* ---------- Eingabe ---------- */
+function press(){ if(state==="play") thrust=true; }
+function release(){ thrust=false; }
+canvas.addEventListener("pointerdown", e=>{ e.preventDefault(); press(); });
+canvas.addEventListener("pointerup", release);
+canvas.addEventListener("pointercancel", release);
+window.addEventListener("touchstart", e=>{ if(e.target===canvas){ e.preventDefault(); press(); } }, {passive:false});
+window.addEventListener("touchend", release, {passive:false});
+window.addEventListener("keydown", e=>{ if(e.code==="Space"){ e.preventDefault(); press(); } });
+window.addEventListener("keyup", e=>{ if(e.code==="Space") release(); });
+
+/* ---------- Spawning ---------- */
+function spawnStern(){ const gy=rand(H*0.18,H*0.82); const n=Math.random()<0.5?1:3;
+  for(let i=0;i<n;i++) sterne.push({x:W+40+i*46, y:gy+Math.sin(i)*30, r:15, got:false, ph:rand(0,6.28)}); }
+function spawnFels(){ const top=Math.random()<0.5;
+  felsen.push({x:W+60, y: top? rand(60,H*0.42) : rand(H*0.58,H-60), r:rand(26,40), rot:rand(0,6.28), vr:rand(-0.02,0.02), spin:rand(0,6.28)}); }
+function spawnSchatten(){ schatten={x:W+120, y:drache.y, vy:0}; }
+function spawnHerz(){ herzen.push({x:W+40, y:rand(H*0.2,H*0.8), r:15, got:false, ph:rand(0,6.28)}); }
+
+/* ---------- Update ---------- */
+function update(){
+  if(state!=="play") return;
+  const sp = SPEED0 + welt*0.35;
+  scroll += sp;
+
+  vy += GRAV; if(thrust) vy -= THRUST; vy=clamp(vy,VYMIN,VYMAX);
+  drache.y += vy; drache.flap += thrust?0.5:0.28;
+  drache.rot = clamp(vy*0.04, -0.5, 0.7);
+  if(drache.y<40){ drache.y=40; vy=0; } if(drache.y>H-40){ drache.y=H-40; vy=0; }
+  // Ember-Spur
+  if(Math.random()<0.7) partikel.push({x:drache.x-22, y:drache.y+rand(-5,5), vx:-sp*0.4+rand(-0.5,0.5), vy:rand(-0.6,0.6), r:rand(1.5,3.5), leben:rand(18,30), max:30, c:thrust?"#ffd27a":"#ff9a6a"});
+
+  spawnTimerS-=1; if(spawnTimerS<=0){ spawnStern(); spawnTimerS=rand(55,90); }
+  spawnTimerF-=1; if(spawnTimerF<=0){ spawnFels(); spawnTimerF=rand(70,120)-welt*4; }
+  schattenTimer-=1; if(schattenTimer<=0 && !schatten){ spawnSchatten(); schattenTimer=rand(480,720); }
+  herzTimer-=1; if(herzTimer<=0){ if(Math.random()<0.5 && lives<5) spawnHerz(); herzTimer=rand(700,1100); }
+
+  for(const s of sterne){ s.x-=sp; s.ph+=0.1;
+    if(!s.got && dist(drache.x,drache.y,s.x,s.y)<34){ s.got=true; score++; document.getElementById("score").textContent=score;
+      for(let i=0;i<10;i++) partikel.push({x:s.x,y:s.y,vx:rand(-3,3),vy:rand(-3,3),r:rand(2,4),leben:rand(20,32),max:32,c:"#ffe680"});
+      if(score>0 && score%12===0){ welt++; weltFlash=90; document.getElementById("welt").textContent=welt; }
+    } }
+  sterne = sterne.filter(s=>s.x>-40 && !s.got);
+
+  for(const f of felsen){ f.x-=sp; f.spin+=f.vr;
+    if(invuln<=0 && dist(drache.x,drache.y,f.x,f.y)<f.r+20){ hit(); } }
+  felsen = felsen.filter(f=>f.x>-60);
+
+  for(const h of herzen){ h.x-=sp; h.ph+=0.08;
+    if(!h.got && dist(drache.x,drache.y,h.x,h.y)<36){ h.got=true; lives=Math.min(5,lives+1); setLivesHUD();
+      for(let i=0;i<12;i++) partikel.push({x:h.x,y:h.y,vx:rand(-3,3),vy:rand(-3,3),r:rand(2,4),leben:rand(20,32),max:32,c:"#ff7aa0"}); } }
+  herzen = herzen.filter(h=>h.x>-40 && !h.got);
+
+  if(schatten){ schatten.x-=sp*0.92; const dy=drache.y-schatten.y; schatten.vy+=clamp(dy*0.01,-0.5,0.5); schatten.vy*=0.96; schatten.y+=schatten.vy;
+    if(invuln<=0 && dist(drache.x,drache.y,schatten.x,schatten.y)<46){ hit(); schatten.x-=120; }
+    if(schatten.x<-120) schatten=null; }
+
+  for(const p of partikel){ p.x+=p.vx; p.y+=p.vy; p.vy+=0.03; p.leben--; }
+  partikel = partikel.filter(p=>p.leben>0);
+  if(hitFlash>0) hitFlash--; if(weltFlash>0) weltFlash--; if(invuln>0) invuln--;
+}
+function hit(){ if(invuln>0) return; lives--; setLivesHUD();
+  hitFlash=18; invuln=70; vy=-6;
+  for(let i=0;i<14;i++) partikel.push({x:drache.x,y:drache.y,vx:rand(-4,4),vy:rand(-4,4),r:rand(2,5),leben:rand(20,34),max:34,c:"#ff7a9a"});
+  if(lives<=0){ state="over"; document.getElementById("overText").textContent="Du hast "+score+" Sterne gesammelt und Welt "+welt+" erreicht!";
+    document.getElementById("overScreen").classList.remove("hidden"); document.getElementById("hud").classList.add("hidden"); document.getElementById("backBtn").classList.add("hidden"); } }
+
+/* ---------- Zeichnen: Hintergrund (illustriert, parallax) ---------- */
+function sky(){
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#241a52"); g.addColorStop(0.45,"#3b2a74"); g.addColorStop(0.78,"#7a4f9e"); g.addColorStop(1,"#e7a6b8");
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  // großer Sonnen-/Lichtschein hinten
+  const sun=ctx.createRadialGradient(W*0.72,H*0.86,20,W*0.72,H*0.86,H*0.7);
+  sun.addColorStop(0,"rgba(255,210,180,0.55)"); sun.addColorStop(0.3,"rgba(255,170,190,0.25)"); sun.addColorStop(1,"rgba(255,170,190,0)");
+  ctx.fillStyle=sun; ctx.fillRect(0,0,W,H);
+}
+function drawBackground(){
+  sky();
+  const now=performance.now()/600;
+  for(const n of nebel){ const x=((n.x - scroll*n.sp*0.15)%(W+600)+W+600)%(W+600)-300;
+    const g=ctx.createRadialGradient(x,n.y,10,x,n.y,n.r); g.addColorStop(0,n.c); g.addColorStop(1,"rgba(0,0,0,0)");
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,n.y,n.r,0,6.28); ctx.fill(); }
+  for(const s of sternFern){ const x=((s.x - scroll*s.sp*0.12)%(W+20)+W+20)%(W+20)-10;
+    ctx.globalAlpha=0.5+0.5*Math.abs(Math.sin(now+s.tw)); ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(x,s.y,s.r,0,6.28); ctx.fill(); }
+  ctx.globalAlpha=1;
+  for(const p of planeten){ const x=((p.x - scroll*p.sp*0.18)%(W+400)+W+400)%(W+400)-200;
+    const g=ctx.createRadialGradient(x-p.r*0.3,p.y-p.r*0.3,p.r*0.2,x,p.y,p.r);
+    g.addColorStop(0,`hsl(${p.hue},70%,80%)`); g.addColorStop(1,`hsl(${p.hue},55%,55%)`);
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,p.y,p.r,0,6.28); ctx.fill();
+    ctx.strokeStyle="rgba(255,255,255,0.25)"; ctx.lineWidth=4; ctx.beginPath(); ctx.ellipse(x,p.y+p.r*0.15,p.r*1.5,p.r*0.4,-0.4,0,6.28); ctx.stroke(); }
+  // Vordergrund-Kristalle (schnelle Ebene)
+  for(const k of kristalle){ const x=((k.x - scroll*k.sp)%(W+300)+W+300)%(W+300)-150;
+    const g=ctx.createLinearGradient(x,H-k.h,x,H); g.addColorStop(0,"rgba(150,110,210,0.9)"); g.addColorStop(1,"rgba(70,50,120,0.95)");
+    ctx.fillStyle=g; ctx.beginPath(); ctx.moveTo(x-18,H); ctx.lineTo(x-6,H-k.h); ctx.lineTo(x+6,H-k.h*0.8); ctx.lineTo(x+20,H); ctx.closePath(); ctx.fill(); }
+}
+
+/* ---------- Zeichnen: Sterne / Felsen / Schatten ---------- */
+function drawStern(s){ const pulse=0.85+0.15*Math.sin(s.ph); ctx.save(); ctx.translate(s.x,s.y); ctx.rotate(s.ph*0.2);
+  const halo=ctx.createRadialGradient(0,0,2,0,0,s.r*2.4); halo.addColorStop(0,"rgba(255,235,140,0.55)"); halo.addColorStop(1,"rgba(255,235,140,0)");
+  ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(0,0,s.r*2.4,0,6.28); ctx.fill();
+  ctx.shadowColor="#ffe680"; ctx.shadowBlur=18;
+  const g=ctx.createLinearGradient(0,-s.r,0,s.r); g.addColorStop(0,"#fff6c8"); g.addColorStop(1,"#ffcf4a"); ctx.fillStyle=g;
+  ctx.beginPath(); for(let i=0;i<10;i++){ const a=(Math.PI/5)*i-Math.PI/2; const r=(i%2===0)?s.r*pulse:s.r*0.45*pulse; ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r); } ctx.closePath(); ctx.fill();
+  ctx.restore(); }
+function drawHerz(h){ const b=Math.sin(h.ph)*3; ctx.save(); ctx.translate(h.x,h.y+b);
+  const halo=ctx.createRadialGradient(0,0,2,0,0,h.r*2.2); halo.addColorStop(0,"rgba(255,140,180,0.5)"); halo.addColorStop(1,"rgba(255,140,180,0)");
+  ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(0,0,h.r*2.2,0,6.28); ctx.fill();
+  ctx.shadowColor="#ff8ab0"; ctx.shadowBlur=16;
+  const g=ctx.createLinearGradient(0,-h.r,0,h.r); g.addColorStop(0,"#ff9ec2"); g.addColorStop(1,"#ff5a90"); ctx.fillStyle=g;
+  ctx.beginPath(); ctx.moveTo(0,h.r*0.7); ctx.bezierCurveTo(h.r,0,h.r*0.5,-h.r,0,-h.r*0.3); ctx.bezierCurveTo(-h.r*0.5,-h.r,-h.r,0,0,h.r*0.7); ctx.fill();
+  ctx.shadowBlur=0; ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.beginPath(); ctx.arc(-h.r*0.3,-h.r*0.3,h.r*0.18,0,6.28); ctx.fill();
+  ctx.restore(); }
+function drawFels(f){ ctx.save(); ctx.translate(f.x,f.y); ctx.rotate(f.spin);
+  ctx.fillStyle="rgba(0,0,0,0.18)"; ctx.beginPath(); ctx.ellipse(3,5,f.r,f.r*0.92,0,0,6.28); ctx.fill();
+  const g=ctx.createRadialGradient(-f.r*0.3,-f.r*0.3,f.r*0.2,0,0,f.r); g.addColorStop(0,"#9a8bb5"); g.addColorStop(1,"#564a72");
+  ctx.fillStyle=g; ctx.beginPath();
+  const pts=9; for(let i=0;i<pts;i++){ const a=(i/pts)*6.28; const rr=f.r*(0.82+0.18*Math.sin(i*2.3)); ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr); } ctx.closePath(); ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,0.18)"; ctx.beginPath(); ctx.arc(-f.r*0.3,-f.r*0.3,f.r*0.28,0,6.28); ctx.fill();
+  ctx.restore(); }
+function drawSchatten(){ const s=schatten; const t=performance.now()/200; ctx.save(); ctx.translate(s.x,s.y);
+  const g=ctx.createRadialGradient(0,0,6,0,0,52); g.addColorStop(0,"rgba(40,10,60,0.95)"); g.addColorStop(0.7,"rgba(60,20,90,0.7)"); g.addColorStop(1,"rgba(60,20,90,0)");
+  ctx.fillStyle=g; ctx.beginPath();
+  for(let i=0;i<16;i++){ const a=(i/16)*6.28; const rr=40+Math.sin(t+i)*8; ctx.lineTo(Math.cos(a)*rr,Math.sin(a)*rr); } ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#ff5a7a"; ctx.beginPath(); ctx.arc(-10,-4,5,0,6.28); ctx.arc(12,-4,5,0,6.28); ctx.fill();
+  ctx.fillStyle="#2a0a3a"; ctx.beginPath(); ctx.arc(-9,-3,2,0,6.28); ctx.arc(13,-3,2,0,6.28); ctx.fill();
+  ctx.restore(); }
+
+/* ---------- Zeichnen: Drache (schattiert) ---------- */
+function drawDrache(){
+  const now=performance.now(); const wing=Math.sin(drache.flap)*0.6;
+  const blink = invuln>0 && Math.floor(now/90)%2===0;
+  ctx.save(); ctx.translate(drache.x, drache.y); ctx.rotate(drache.rot); ctx.globalAlpha = blink?0.4:1;
+  // weicher Schatten unter dem Drachen
+  ctx.save(); ctx.globalAlpha=(blink?0.4:1)*0.2; ctx.fillStyle="#000"; ctx.beginPath(); ctx.ellipse(0,30,30,9,0,0,6.28); ctx.fill(); ctx.restore();
+  // Hinterer Flügel
+  ctx.save(); ctx.rotate(-0.4+wing*0.5); wingShape("#5a8fd6","#3f63a8"); ctx.restore();
+  // Schweif
+  ctx.strokeStyle="#2fae7a"; ctx.lineWidth=9; ctx.lineCap="round"; ctx.beginPath(); ctx.moveTo(-14,8); ctx.quadraticCurveTo(-40,18+Math.sin(now/200)*6,-46,0); ctx.stroke();
+  ctx.fillStyle="#7be3a8"; ctx.beginPath(); ctx.moveTo(-46,-7); ctx.lineTo(-58,1); ctx.lineTo(-46,9); ctx.closePath(); ctx.fill();
+  // Körper (Verlauf + Bauch)
+  const bg=ctx.createLinearGradient(0,-18,0,22); bg.addColorStop(0,"#6ee29c"); bg.addColorStop(1,"#2bb673");
+  ctx.fillStyle=bg; ctx.beginPath(); ctx.ellipse(0,6,24,17,0,0,6.28); ctx.fill();
+  ctx.fillStyle="#eafff2"; ctx.beginPath(); ctx.ellipse(3,11,13,10,0,0,6.28); ctx.fill();
+  // Rim-Light oben
+  ctx.strokeStyle="rgba(220,255,235,0.8)"; ctx.lineWidth=2.5; ctx.beginPath(); ctx.ellipse(0,6,24,17,0,Math.PI*1.05,Math.PI*1.95); ctx.stroke();
+  // Kopf
+  const hg=ctx.createLinearGradient(8,-20,24,2); hg.addColorStop(0,"#6ee29c"); hg.addColorStop(1,"#34c07e");
+  ctx.fillStyle=hg; ctx.beginPath(); ctx.ellipse(18,-8,14,13,0,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(30,-3,7,6,0,0,6.28); ctx.fill();
+  // Nasenlöcher
+  ctx.fillStyle="#1f8f57"; ctx.beginPath(); ctx.arc(34,-4,1.2,0,6.28); ctx.fill();
+  // Hörner
+  ctx.fillStyle="#bfa0e8"; horn(11,-19,8,-31,17,-20); horn(2,-18,-4,-29,8,-19);
+  // Auge groß + Glanz
+  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(20,-9,5.2,0,6.28); ctx.fill();
+  ctx.fillStyle="#243a3f"; ctx.beginPath(); ctx.arc(21.5,-9,3,0,6.28); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(23,-10.5,1.1,0,6.28); ctx.fill();
+  // Bäckchen
+  ctx.fillStyle="rgba(255,140,170,0.45)"; ctx.beginPath(); ctx.arc(14,-2,3.2,0,6.28); ctx.fill();
+  // Vorderer Flügel
+  ctx.save(); ctx.rotate(-0.2-wing*0.7); wingShape("#9ad0ff","#5a8fd6"); ctx.restore();
+  // Feuerhauch beim Steigen
+  if(thrust){ ctx.save(); ctx.globalAlpha=(blink?0.4:1); ctx.fillStyle="#ffd27a"; ctx.beginPath(); ctx.moveTo(36,-2); ctx.lineTo(58,-6+Math.sin(now/40)*3); ctx.lineTo(50,0); ctx.lineTo(60,3); ctx.lineTo(48,5); ctx.lineTo(54,9); ctx.lineTo(36,4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle="#ff8a4a"; ctx.beginPath(); ctx.moveTo(36,-1); ctx.lineTo(50,-3); ctx.lineTo(47,2); ctx.lineTo(52,4); ctx.lineTo(36,4); ctx.closePath(); ctx.fill(); ctx.restore(); }
+  ctx.restore();
+}
+function wingShape(c1,c2){ const g=ctx.createLinearGradient(-6,-30,-20,6); g.addColorStop(0,c1); g.addColorStop(1,c2);
+  ctx.fillStyle=g; ctx.beginPath(); ctx.moveTo(-2,-2); ctx.quadraticCurveTo(-30,-34,-6,-2); ctx.quadraticCurveTo(-26,-20,-2,8); ctx.closePath();
+  ctx.moveTo(-2,-2); ctx.quadraticCurveTo(-22,-26,-2,-2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-2,-2); ctx.quadraticCurveTo(-26,-26,-16,-1); ctx.quadraticCurveTo(-10,-8,-2,6); ctx.closePath(); ctx.fill(); }
+function horn(x1,y1,x2,y2,x3,y3){ ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.lineTo(x3,y3); ctx.closePath(); ctx.fill(); }
+
+/* ---------- Overlays/Effekte ---------- */
+function drawParticles(){ for(const p of partikel){ ctx.globalAlpha=Math.max(0,p.leben/p.max); ctx.fillStyle=p.c;
+  ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,6.28); ctx.fill(); } ctx.globalAlpha=1; }
+function drawGrainVignette(){
+  if(grain){ ctx.globalAlpha=1; ctx.fillStyle=grain; ctx.fillRect(0,0,W,H); }
+  const v=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.35,W/2,H/2,Math.max(W,H)*0.72);
+  v.addColorStop(0,"rgba(0,0,0,0)"); v.addColorStop(1,"rgba(20,8,40,0.55)"); ctx.fillStyle=v; ctx.fillRect(0,0,W,H);
+  if(hitFlash>0){ ctx.fillStyle=`rgba(255,80,110,${hitFlash/18*0.35})`; ctx.fillRect(0,0,W,H); }
+  if(weltFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,weltFlash/45); ctx.fillStyle="#fff"; ctx.font="800 "+Math.round(Math.min(W,H)*0.09)+"px "+font();
+    ctx.textAlign="center"; ctx.fillText("Welt "+welt+" ✨", W/2, H*0.4); ctx.restore(); ctx.textAlign="left"; }
+}
+function font(){ return 'ui-rounded,"Baloo 2","Comic Sans MS",system-ui,sans-serif'; }
+
+function draw(){
+  drawBackground();
+  if(state!=="start"){
+    for(const s of sterne) drawStern(s);
+    for(const h of herzen) drawHerz(h);
+    for(const f of felsen) drawFels(f);
+    if(schatten) drawSchatten();
+    drawDrache();
+    drawParticles();
+  } else { drawDrache(); }
+  drawGrainVignette();
+}
+function loop(){ try{ update(); draw(); }catch(e){ console.error(e); } requestAnimationFrame(loop); }
+
+/* ---------- Start / Neustart ---------- */
+function starten(){ reset(); state="play";
+  document.getElementById("startScreen").classList.add("hidden");
+  document.getElementById("overScreen").classList.add("hidden");
+  document.getElementById("hud").classList.remove("hidden");
+  document.getElementById("backBtn").classList.remove("hidden");
+}
+document.getElementById("startBtn").addEventListener("click", starten);
+document.getElementById("restartBtn").addEventListener("click", starten);
+window.addEventListener("resize", resize);
+resize(); reset(); state="start"; loop();
+</script>
+</body>
+</html>

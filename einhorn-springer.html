@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Einhorn – Klippenspringer (Mockup)</title>
+<style>
+  html,body{ margin:0; padding:0; height:100%; overflow:hidden; background:#bfe9ff;
+    font-family:ui-rounded,"SF Pro Rounded","Baloo 2","Comic Sans MS",system-ui,sans-serif;
+    -webkit-user-select:none; user-select:none; touch-action:none; -webkit-tap-highlight-color:transparent; }
+  #game{ display:block; width:100vw; height:100vh; }
+  .overlay{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; padding:20px; box-sizing:border-box; }
+  .card{ background:linear-gradient(135deg, rgba(255,255,255,0.6), rgba(255,225,245,0.4));
+    border:1.5px solid rgba(255,255,255,0.7); border-radius:28px; padding:26px 30px; max-width:460px; width:100%;
+    color:#5a3f78; backdrop-filter:blur(14px) saturate(150%); -webkit-backdrop-filter:blur(14px) saturate(150%);
+    box-shadow:0 20px 60px rgba(150,110,180,0.35); animation:pop .45s cubic-bezier(.2,.9,.3,1.3); }
+  @keyframes pop{0%{transform:scale(.8);opacity:0}100%{transform:scale(1);opacity:1}}
+  h1{ margin:0 0 8px; font-size:clamp(24px,5.5vw,38px); }
+  p{ margin:8px 0; font-size:clamp(15px,3.4vw,19px); color:#6a4f8f; line-height:1.45; }
+  button{ margin-top:18px; font-family:inherit; font-size:clamp(19px,4vw,24px); color:#fff; font-weight:800;
+    background:linear-gradient(180deg,#ffa8d6,#ff6fb0); border:none; border-radius:999px; padding:15px 38px;
+    box-shadow:0 8px 22px rgba(255,110,176,0.5), inset 0 2px 0 rgba(255,255,255,0.6); cursor:pointer; }
+  button:active{ transform:translateY(3px); }
+  .hidden{ display:none !important; }
+  #hud{ position:fixed; top:14px; left:16px; right:16px; z-index:4; display:flex; gap:12px; align-items:center;
+    font-weight:800; font-size:20px; color:#5a3f78; text-shadow:0 1px 4px rgba(255,255,255,0.6); pointer-events:none; }
+  #hud .chip{ background:rgba(255,255,255,0.5); border:1px solid rgba(255,255,255,0.7); border-radius:16px; padding:7px 14px; backdrop-filter:blur(8px); }
+  #lives{ margin-left:auto; font-size:24px; letter-spacing:2px; }
+  #backBtn{ position:fixed; bottom:14px; right:16px; z-index:6; text-decoration:none; color:#5a3f78; font-weight:800;
+    background:rgba(255,255,255,0.6); border:1px solid rgba(255,255,255,0.8); border-radius:16px; padding:8px 14px;
+    font-size:16px; backdrop-filter:blur(8px); }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud" class="hidden">
+  <div class="chip">🌸 <span id="score">0</span></div>
+  <div class="chip">🌍 Welt <span id="welt">1</span></div>
+  <div id="lives" class="chip">❤️❤️❤️</div>
+</div>
+<a id="backBtn" href="index.html" class="hidden">≡ Menü</a>
+
+<div id="startScreen" class="overlay">
+  <div class="card">
+    <h1>🦄 Klippenspringer</h1>
+    <p><b>Oben tippen</b> = hüpfen.<br><b>Unten halten</b> = ducken.</p>
+    <p>Spring von Klippe zu Klippe, sammle 🌸 Blumen und weiche dem Kobold aus. Du hast <b>3 Leben</b> – selten taucht ein ❤️ auf!</p>
+    <button id="startBtn">▶ Losspringen</button>
+  </div>
+</div>
+
+<div id="overScreen" class="overlay hidden">
+  <div class="card">
+    <h1>😴 Geschafft fürs Erste!</h1>
+    <p id="overText">Du hast viele Blumen gesammelt.</p>
+    <button id="restartBtn">▶ Nochmal</button>
+    <a href="index.html" style="display:block;margin-top:12px;color:#c77;font-weight:700;text-decoration:none;font-size:17px;">≡ Zur Spielauswahl</a>
+  </div>
+</div>
+
+<script>
+"use strict";
+const canvas=document.getElementById("game"), ctx=canvas.getContext("2d");
+let W=0,H=0,DPR=1,grain=null;
+function makeGrain(){ try{ const c=document.createElement("canvas"); c.width=140;c.height=140; const g=c.getContext("2d");
+  const id=g.createImageData(140,140); for(let i=0;i<id.data.length;i+=4){ const v=210+Math.random()*45; id.data[i]=id.data[i+1]=id.data[i+2]=v; id.data[i+3]=Math.random()*14; }
+  g.putImageData(id,0,0); grain=ctx.createPattern(c,"repeat"); }catch(e){ grain=null; } }
+function resize(){ DPR=Math.min(window.devicePixelRatio||1,2); W=window.innerWidth; H=window.innerHeight;
+  canvas.width=W*DPR; canvas.height=H*DPR; canvas.style.width=W+"px"; canvas.style.height=H+"px"; ctx.setTransform(DPR,0,0,DPR,0,0);
+  makeGrain(); buildParallax(); }
+function rand(a,b){ return a+Math.random()*(b-a); }
+function clamp(v,a,b){ return v<a?a:(v>b?b:v); }
+
+/* ---------- Parallax ---------- */
+let wolken=[], huegelFern=[], huegelNah=[], busch=[];
+function buildParallax(){
+  wolken=[]; for(let i=0;i<5;i++) wolken.push({x:rand(0,W),y:rand(40,H*0.32),s:rand(0.7,1.5),sp:rand(0.15,0.4)});
+  busch=[]; for(let i=0;i<8;i++) busch.push({x:rand(0,W*1.3),s:rand(0.7,1.3),sp:1.5,hue:rand(95,135)});
+}
+
+/* ---------- Spielzustand ---------- */
+const UNIX_FACTOR=0.30;
+let uni, klippen, objekte, partikel, score, welt, lives, scroll, invuln, hitFlash, weltFlash, duckHold, nextPlatX, spawnGrace;
+const GRAV=0.7, JUMP=13, STAND=23, DUCK=14, SPEED0=4.2;
+let state="start";
+
+function uniX(){ return W*UNIX_FACTOR; }
+function reset(){
+  uni={ y:H*0.45, vy:0, onGround:false, duck:false };
+  klippen=[]; objekte=[]; partikel=[]; score=0; welt=1; lives=3; scroll=0;
+  invuln=60; hitFlash=0; weltFlash=0; duckHold=false; spawnGrace=2;
+  // Startplattformen, erste ohne Hindernis direkt unter dem Einhorn
+  let x=-40, top=H*0.72;
+  for(let i=0;i<6;i++){ const w=rand(220,340); klippen.push({x,w,top,deko:i}); addObjekteFuer(klippen[klippen.length-1], i<2); top=clamp(top+rand(-50,50),H*0.58,H*0.82); x+=w+ (i<2?0:rand(50,120)); }
+  nextPlatX=x;
+  uni.y=klippen[1].top-STAND;
+  setLivesHUD(); document.getElementById("score").textContent="0"; document.getElementById("welt").textContent="1";
+}
+function addObjekteFuer(p, grace){
+  // Blumen über der Plattform
+  const n=Math.floor(rand(1,4));
+  for(let i=0;i<n;i++) objekte.push({type:"blume", x:p.x+p.w*((i+1)/(n+1)), y:p.top-rand(46,110), r:15, got:false, ph:rand(0,6.28), farbe:["#ff9aa9","#9ac1ff","#ffe39a","#cdb0ff","#ffc09a"][Math.floor(rand(0,5))]});
+  if(grace) return;
+  const r=Math.random();
+  if(r<0.34) objekte.push({type:"kobBoden", x:p.x+p.w*0.62, y:p.top-15, ph:rand(0,6.28)});
+  else if(r<0.6) objekte.push({type:"kobFlug", x:p.x+p.w*0.45, y:p.top-42, ph:rand(0,6.28)});
+  if(Math.random()<0.07) objekte.push({type:"herz", x:p.x+p.w*0.5, y:p.top-rand(80,140), r:14, got:false, ph:rand(0,6.28)});
+}
+function setLivesHUD(){ document.getElementById("lives").textContent="❤️".repeat(Math.max(0,lives))+"🖤".repeat(Math.max(0,3-lives>0?3-lives:0)); }
+
+/* ---------- Eingabe: oben tippen = springen, unten halten = ducken ---------- */
+function onDown(x,y){ if(state!=="play") return; if(y < H*0.55){ if(uni.onGround){ uni.vy=-JUMP; uni.onGround=false; puff(uniX(), uni.y+STAND, "#ffffff", 6); } } else { duckHold=true; } }
+function onUp(){ duckHold=false; }
+canvas.addEventListener("pointerdown", e=>{ e.preventDefault(); onDown(e.clientX,e.clientY); });
+window.addEventListener("pointerup", onUp);
+window.addEventListener("pointercancel", onUp);
+canvas.addEventListener("touchstart", e=>{ e.preventDefault(); const t=e.touches[0]; if(t) onDown(t.clientX,t.clientY); }, {passive:false});
+window.addEventListener("touchend", e=>{ onUp(); }, {passive:false});
+window.addEventListener("keydown", e=>{ if(state!=="play")return; if(e.code==="Space"||e.code==="ArrowUp"){ e.preventDefault(); if(uni.onGround){ uni.vy=-JUMP; uni.onGround=false; } } if(e.code==="ArrowDown") duckHold=true; });
+window.addEventListener("keyup", e=>{ if(e.code==="ArrowDown") duckHold=false; });
+
+/* ---------- Helfer ---------- */
+function puff(x,y,c,n){ for(let i=0;i<(n||8);i++) partikel.push({x,y,vx:rand(-2,2),vy:rand(-2.5,0.5),r:rand(2,4),leben:rand(16,26),max:26,c}); }
+function platformUnter(x){ for(const p of klippen){ if(x>=p.x && x<=p.x+p.w) return p; } return null; }
+function platformVoraus(x){ let best=null; for(const p of klippen){ if(p.x+p.w>=x){ if(!best||p.x<best.x) best=p; } } return best; }
+
+/* ---------- Update ---------- */
+function update(){
+  if(state!=="play") return;
+  const sp=SPEED0+welt*0.25; scroll+=sp;
+  // alles nach links schieben
+  for(const p of klippen) p.x-=sp;
+  for(const o of objekte) o.x-=sp;
+  nextPlatX-=sp;
+  // neue Plattformen nachschieben
+  const last=klippen[klippen.length-1];
+  if(last.x+last.w < W+400){ const w=rand(200,340); const top=clamp(last.top+rand(-60,60),H*0.56,H*0.84); const gap=rand(50,120);
+    const np={x:last.x+last.w+gap, w, top}; klippen.push(np); addObjekteFuer(np, false); }
+  klippen=klippen.filter(p=>p.x+p.w>-60);
+
+  // Einhorn-Physik
+  uni.duck = duckHold && uni.onGround;
+  const half = uni.duck?DUCK:STAND;
+  uni.vy+=GRAV; uni.vy=clamp(uni.vy,-20,18);
+  const prevFoot=uni.y+half; uni.y+=uni.vy; const newFoot=uni.y+half;
+  const p=platformUnter(uniX());
+  if(p && uni.vy>=0 && prevFoot<=p.top+4 && newFoot>=p.top){ uni.y=p.top-half; uni.vy=0; uni.onGround=true; }
+  else if(p && Math.abs(newFoot-p.top)<2 && uni.vy>=0){ uni.onGround=true; }
+  else uni.onGround=false;
+  // in Lücke gefallen
+  if(uni.y-half>H){ verliere("sturz"); const pa=platformVoraus(uniX())||klippen[0]; uni.y=pa.top-STAND; uni.vy=0; }
+
+  // Objekte
+  const ux=uniX(), uy=uni.y, uHalf=half;
+  for(const o of objekte){ o.ph+=0.08;
+    const dx=Math.abs(o.x-ux);
+    if(o.type==="blume"){ if(!o.got && dx<30 && Math.abs(o.y-uy)<38){ o.got=true; score++; document.getElementById("score").textContent=score;
+        for(let i=0;i<8;i++) partikel.push({x:o.x,y:o.y,vx:rand(-2.5,2.5),vy:rand(-2.5,2.5),r:rand(2,4),leben:rand(18,28),max:28,c:o.farbe});
+        if(score%12===0){ welt++; weltFlash=90; document.getElementById("welt").textContent=welt; } } }
+    else if(o.type==="herz"){ if(!o.got && dx<32 && Math.abs(o.y-uy)<40){ o.got=true; lives=Math.min(5,lives+1); setLivesHUD(); puff(o.x,o.y,"#ff7aa0",12); } }
+    else if(o.type==="kobBoden"){ if(invuln<=0 && dx<24 && (uy+uHalf)>(o.y-14) && (uy-uHalf)<(o.y+16)) verliere("kobold"); }
+    else if(o.type==="kobFlug"){ if(invuln<=0 && dx<24 && (uy-uHalf)<(o.y+13) && (uy+uHalf)>(o.y-13)) verliere("kobold"); }
+  }
+  objekte=objekte.filter(o=>o.x>-60 && !o.got);
+
+  for(const pt of partikel){ pt.x-=sp*0.3; pt.x+=pt.vx; pt.y+=pt.vy; pt.vy+=0.05; pt.leben--; }
+  partikel=partikel.filter(pt=>pt.leben>0);
+  if(hitFlash>0)hitFlash--; if(weltFlash>0)weltFlash--; if(invuln>0)invuln--;
+}
+function verliere(grund){ if(invuln>0) return; lives--; setLivesHUD(); invuln=80; hitFlash=20; uni.vy=-7;
+  for(let i=0;i<16;i++) partikel.push({x:uniX(),y:uni.y,vx:rand(-4,4),vy:rand(-4,2),r:rand(2,5),leben:rand(20,34),max:34,c:"#ff7a9a"});
+  if(lives<=0){ state="over"; document.getElementById("overText").textContent="Du hast "+score+" Blumen gesammelt und Welt "+welt+" erreicht!";
+    document.getElementById("overScreen").classList.remove("hidden"); document.getElementById("hud").classList.add("hidden"); document.getElementById("backBtn").classList.add("hidden"); } }
+
+/* ---------- Hintergrund ---------- */
+function sky(){ const g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,"#a9e4ff"); g.addColorStop(0.55,"#cdf0ff"); g.addColorStop(1,"#eafff0"); ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+  const sun=ctx.createRadialGradient(W*0.82,H*0.16,10,W*0.82,H*0.16,H*0.5); sun.addColorStop(0,"rgba(255,248,200,0.9)"); sun.addColorStop(0.4,"rgba(255,240,170,0.3)"); sun.addColorStop(1,"rgba(255,240,170,0)"); ctx.fillStyle=sun; ctx.fillRect(0,0,W,H); }
+function huegel(off,baseY,amp,c1,c2){ const g=ctx.createLinearGradient(0,baseY-60,0,H); g.addColorStop(0,c1); g.addColorStop(1,c2); ctx.fillStyle=g;
+  ctx.beginPath(); ctx.moveTo(0,baseY); for(let x=0;x<=W;x+=30){ ctx.lineTo(x, baseY+Math.sin((x+off)*0.005)*amp); } ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill(); }
+function drawBackground(){ sky();
+  for(const c of wolken){ const x=((c.x-scroll*c.sp*0.1)%(W+260)+W+260)%(W+260)-130; wolke(x,c.y,c.s); }
+  huegel(scroll*0.05, H*0.46, 30, "#cdeeb8", "#b6e6a0");
+  huegel(scroll*0.12, H*0.58, 26, "#a6e08a", "#8fd673");
+}
+function wolke(x,y,s){ ctx.save(); ctx.translate(x,y); ctx.scale(s,s); ctx.fillStyle="rgba(255,255,255,0.92)";
+  for(const[dx,dy,r] of [[-26,4,18],[-6,-8,24],[18,2,20],[2,8,16]]){ ctx.beginPath(); ctx.arc(dx,dy,r,0,6.28); ctx.fill(); } ctx.restore(); }
+
+/* ---------- Klippen ---------- */
+function drawKlippe(p){ const h=H-p.top;
+  const g=ctx.createLinearGradient(0,p.top,0,H); g.addColorStop(0,"#a8794f"); g.addColorStop(1,"#7a5436"); ctx.fillStyle=g;
+  ctx.beginPath(); ctx.moveTo(p.x-6,H); ctx.lineTo(p.x-2,p.top+14); ctx.quadraticCurveTo(p.x,p.top,p.x+16,p.top); ctx.lineTo(p.x+p.w-16,p.top); ctx.quadraticCurveTo(p.x+p.w,p.top,p.x+p.w+2,p.top+14); ctx.lineTo(p.x+p.w+6,H); ctx.closePath(); ctx.fill();
+  // Gras-Oberkante
+  ctx.fillStyle="#6fc24a"; ctx.beginPath(); ctx.moveTo(p.x-2,p.top+14); ctx.quadraticCurveTo(p.x,p.top-2,p.x+16,p.top-2); ctx.lineTo(p.x+p.w-16,p.top-2); ctx.quadraticCurveTo(p.x+p.w,p.top-2,p.x+p.w+2,p.top+14); ctx.lineTo(p.x+p.w+2,p.top+16); ctx.quadraticCurveTo(p.x+p.w*0.5,p.top+8,p.x-2,p.top+16); ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#86d95f"; for(let gx=p.x+10; gx<p.x+p.w-6; gx+=22){ ctx.beginPath(); ctx.moveTo(gx,p.top-1); ctx.lineTo(gx+3,p.top-8); ctx.lineTo(gx+6,p.top-1); ctx.closePath(); ctx.fill(); }
+  ctx.fillStyle="rgba(255,255,255,0.06)"; ctx.fillRect(p.x+6,p.top+18,p.w-12,6);
+}
+
+/* ---------- Objekte ---------- */
+function drawObjekt(o){
+  if(o.type==="blume"){ const k=Math.sin(o.ph)*2; ctx.save(); ctx.translate(o.x+k,o.y);
+    const halo=ctx.createRadialGradient(0,0,2,0,0,o.r*1.8); halo.addColorStop(0,"rgba(255,255,255,0.5)"); halo.addColorStop(1,"rgba(255,255,255,0)"); ctx.fillStyle=halo; ctx.beginPath(); ctx.arc(0,0,o.r*1.8,0,6.28); ctx.fill();
+    ctx.fillStyle=o.farbe; for(let i=0;i<6;i++){ const a=(i/6)*6.28; ctx.beginPath(); ctx.ellipse(Math.cos(a)*o.r*0.62,Math.sin(a)*o.r*0.62,o.r*0.46,o.r*0.46,0,0,6.28); ctx.fill(); }
+    ctx.fillStyle="#fff6c8"; ctx.beginPath(); ctx.arc(0,0,o.r*0.44,0,6.28); ctx.fill(); ctx.restore(); }
+  else if(o.type==="herz"){ const b=Math.sin(o.ph)*3; ctx.save(); ctx.translate(o.x,o.y+b); ctx.shadowColor="#ff8ab0"; ctx.shadowBlur=16;
+    const g=ctx.createLinearGradient(0,-o.r,0,o.r); g.addColorStop(0,"#ff9ec2"); g.addColorStop(1,"#ff5a90"); ctx.fillStyle=g;
+    ctx.beginPath(); ctx.moveTo(0,o.r*0.7); ctx.bezierCurveTo(o.r,0,o.r*0.5,-o.r,0,-o.r*0.3); ctx.bezierCurveTo(-o.r*0.5,-o.r,-o.r,0,0,o.r*0.7); ctx.fill();
+    ctx.shadowBlur=0; ctx.fillStyle="rgba(255,255,255,0.7)"; ctx.beginPath(); ctx.arc(-o.r*0.3,-o.r*0.3,o.r*0.18,0,6.28); ctx.fill(); ctx.restore(); }
+  else if(o.type==="kobBoden"||o.type==="kobFlug"){ kobold(o); }
+}
+function kobold(o){ const wob=Math.sin(o.ph)*3; ctx.save(); ctx.translate(o.x, o.y+(o.type==="kobFlug"?wob:0));
+  if(o.type==="kobFlug"){ ctx.fillStyle="rgba(120,90,170,0.25)"; ctx.beginPath(); ctx.ellipse(-18,2,10,5,0,0,6.28); ctx.ellipse(18,2,10,5,0,0,6.28); ctx.fill(); }
+  const g=ctx.createRadialGradient(-4,-6,4,0,0,22); g.addColorStop(0,"#b48fe0"); g.addColorStop(1,"#7a52b0"); ctx.fillStyle=g;
+  ctx.beginPath(); ctx.moveTo(-18,8); ctx.bezierCurveTo(-22,-18,22,-18,18,8); for(let i=3;i>=-3;i--){ ctx.lineTo(i*6,12+(i%2===0?0:6)); } ctx.closePath(); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(-6,-2,5,0,6.28); ctx.arc(6,-2,5,0,6.28); ctx.fill();
+  ctx.fillStyle="#3a2a4a"; ctx.beginPath(); ctx.arc(-5,-1,2.3,0,6.28); ctx.arc(7,-1,2.3,0,6.28); ctx.fill();
+  ctx.fillStyle="#2a1a3a"; ctx.lineWidth=0; ctx.beginPath(); ctx.moveTo(-9,-9); ctx.lineTo(-2,-6); ctx.moveTo(9,-9); ctx.lineTo(2,-6); ctx.strokeStyle="#2a1a3a"; ctx.lineWidth=2; ctx.stroke();
+  ctx.restore(); }
+
+/* ---------- Einhorn (schattiert) ---------- */
+function drawEinhorn(){ const now=performance.now(); const half=uni.duck?DUCK:STAND; const blink=invuln>0&&Math.floor(now/90)%2===0;
+  const x=uniX(), y=uni.y; const run=Math.sin(now/90)*(uni.onGround?1:0);
+  ctx.save(); ctx.translate(x,y); ctx.globalAlpha=blink?0.45:1;
+  // Schatten
+  ctx.save(); ctx.globalAlpha=(blink?0.4:1)*0.18; ctx.fillStyle="#000"; ctx.beginPath(); ctx.ellipse(0,half+4,26,7,0,0,6.28); ctx.fill(); ctx.restore();
+  const squash=uni.duck?1.25:1, ysquash=uni.duck?0.62:1;
+  ctx.scale(squash,ysquash);
+  // Beine (laufend)
+  ctx.strokeStyle="#e9e0f5"; ctx.lineWidth=6; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(-10,10); ctx.lineTo(-12+run*4,24); ctx.moveTo(8,10); ctx.lineTo(10-run*4,24); ctx.stroke();
+  // Schweif Regenbogen
+  const mane=["#ff9aa9","#ffc09a","#ffe39a","#a9e8b8","#9ac1ff","#cdb0ff"];
+  for(let i=0;i<mane.length;i++){ ctx.fillStyle=mane[i]; ctx.beginPath(); ctx.arc(-22,-2+i*3,5,0,6.28); ctx.fill(); }
+  // Körper Verlauf
+  const bg=ctx.createLinearGradient(0,-16,0,18); bg.addColorStop(0,"#ffffff"); bg.addColorStop(1,"#eadcff"); ctx.fillStyle=bg;
+  ctx.beginPath(); ctx.ellipse(0,4,22,15,0,0,6.28); ctx.fill();
+  // Kopf
+  ctx.fillStyle="#ffffff"; ctx.beginPath(); ctx.ellipse(15,-9,12,11,0,0,6.28); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(25,-5,6,5,0,0,6.28); ctx.fill();
+  // Mähne
+  for(let i=0;i<mane.length;i++){ ctx.fillStyle=mane[i]; ctx.beginPath(); ctx.arc(5-i*4.5,-13+i*3,5.5,0,6.28); ctx.fill(); }
+  // Horn glühend
+  ctx.shadowColor="#ffe6a0"; ctx.shadowBlur=10; ctx.fillStyle="#ffd86b"; ctx.beginPath(); ctx.moveTo(18,-18); ctx.lineTo(22,-34); ctx.lineTo(25,-17); ctx.closePath(); ctx.fill(); ctx.shadowBlur=0;
+  // Auge + Glanz
+  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(17,-10,4,0,6.28); ctx.fill();
+  ctx.fillStyle="#4a3a5a"; ctx.beginPath(); ctx.arc(18,-10,2.3,0,6.28); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(19,-11,0.9,0,6.28); ctx.fill();
+  // Bäckchen
+  ctx.fillStyle="rgba(255,150,180,0.5)"; ctx.beginPath(); ctx.arc(11,-3,3,0,6.28); ctx.fill();
+  ctx.restore();
+}
+
+/* ---------- Effekte/Overlay ---------- */
+function drawParticles(){ for(const p of partikel){ ctx.globalAlpha=Math.max(0,p.leben/p.max); ctx.fillStyle=p.c; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,6.28); ctx.fill(); } ctx.globalAlpha=1; }
+function drawGrainVignette(){ if(grain){ ctx.fillStyle=grain; ctx.fillRect(0,0,W,H); }
+  const v=ctx.createRadialGradient(W/2,H/2,Math.min(W,H)*0.4,W/2,H/2,Math.max(W,H)*0.72); v.addColorStop(0,"rgba(0,0,0,0)"); v.addColorStop(1,"rgba(60,40,90,0.4)"); ctx.fillStyle=v; ctx.fillRect(0,0,W,H);
+  if(hitFlash>0){ ctx.fillStyle=`rgba(255,80,110,${hitFlash/20*0.35})`; ctx.fillRect(0,0,W,H); }
+  if(weltFlash>0){ ctx.save(); ctx.globalAlpha=Math.min(1,weltFlash/45); ctx.fillStyle="#fff"; ctx.font="800 "+Math.round(Math.min(W,H)*0.09)+"px "+font(); ctx.textAlign="center"; ctx.fillText("Welt "+welt+" 🌼",W/2,H*0.4); ctx.restore(); ctx.textAlign="left"; } }
+function font(){ return 'ui-rounded,"Baloo 2","Comic Sans MS",system-ui,sans-serif'; }
+
+function draw(){ drawBackground();
+  for(const p of klippen) drawKlippe(p);
+  for(const o of objekte) drawObjekt(o);
+  if(state!=="start") drawEinhorn(); else { uni.y=H*0.5; drawEinhorn(); }
+  drawParticles(); drawGrainVignette(); }
+function loop(){ try{ update(); draw(); }catch(e){ console.error(e); } requestAnimationFrame(loop); }
+
+/* ---------- Start/Restart ---------- */
+function starten(){ reset(); state="play"; document.getElementById("startScreen").classList.add("hidden"); document.getElementById("overScreen").classList.add("hidden"); document.getElementById("hud").classList.remove("hidden"); document.getElementById("backBtn").classList.remove("hidden"); }
+document.getElementById("startBtn").addEventListener("click", starten);
+document.getElementById("restartBtn").addEventListener("click", starten);
+window.addEventListener("resize", resize);
+resize(); reset(); state="start"; loop();
+</script>
+</body>
+</html>

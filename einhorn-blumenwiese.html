@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Einhorn auf der Blumenwiese</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #bfe9ff;
+    font-family: "Comic Sans MS", "Chalkboard SE", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  #game { display: block; width: 100vw; height: 100vh; }
+  .overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    color: #5a2d82; padding: 24px; box-sizing: border-box;
+  }
+  .card {
+    background: rgba(255,255,255,0.92); border-radius: 28px; padding: 28px 32px;
+    max-width: 520px; box-shadow: 0 10px 30px rgba(90,45,130,0.25);
+  }
+  h1 { font-size: clamp(28px, 6vw, 48px); margin: 0 0 8px; }
+  p  { font-size: clamp(16px, 3.2vw, 22px); line-height: 1.4; margin: 8px 0; }
+  button {
+    margin-top: 18px; font-family: inherit; font-size: clamp(20px, 4vw, 26px);
+    background: #ff7ac0; color: white; border: none; border-radius: 999px;
+    padding: 14px 34px; box-shadow: 0 6px 0 #d44e98; cursor: pointer;
+  }
+  button:active { transform: translateY(4px); box-shadow: 0 2px 0 #d44e98; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="startScreen" class="overlay">
+  <div class="card">
+    <h1>🦄 Einhorn auf der Blumenwiese</h1>
+    <p>Führe das Einhorn mit dem Finger über die Wiese.</p>
+    <p>Sammle die Blumen in der <b>richtigen Farbe</b> oben. Graue Blumen kannst du mit <b>Magie</b> ✨ einfärben. Geht die Magie aus, sammle <b>Erdbeeren</b> 🍓.</p>
+    <p>Pass auf den <b>Schatten-Kobold</b> 👾 auf – er klaut dir Blumen!</p>
+    <button id="startBtn">Los geht's!</button>
+  </div>
+</div>
+
+<div id="levelScreen" class="overlay hidden">
+  <div class="card">
+    <h1 id="levelTitle">Geschafft! 🌸</h1>
+    <p id="levelText"></p>
+    <button id="nextBtn">Weiter</button>
+  </div>
+</div>
+
+<div id="winScreen" class="overlay hidden">
+  <div class="card">
+    <h1>🌈 Du hast gewonnen!</h1>
+    <p>Dein Einhorn ist groß und stark geworden und wohnt jetzt in der allergrößten Blume.</p>
+    <button id="againBtn">Nochmal spielen</button>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   EINSTELLUNGEN  –  hier dürfen die Kinder gerne Zahlen verändern!
+   ========================================================================= */
+const CONFIG = {
+  einhornStartGroesse: 26,     // wie groß das Baby-Einhorn startet
+  wachstumProLevel:    7,      // wie viel größer es pro Level wird
+  magieStart:          100,    // volle Magie
+  magieKostenFaerben:  25,     // Magie-Kosten, um eine graue Blume zu färben
+  erdbeereGibtMagie:   40,     // wie viel Magie eine Erdbeere bringt
+  blumenAufWiese:      9,      // wie viele Blumen gleichzeitig liegen
+
+  // Die 3 Level. Farbe = Zielfarbe, ziel = wie viele Blumen man braucht.
+  level: [
+    { name: "Rot",    farbe: "#ff5566", ziel: 6,  koboldTempo: 1.4, erdbeeren: 2 },
+    { name: "Blau",   farbe: "#4d8bff", ziel: 8,  koboldTempo: 1.9, erdbeeren: 2 },
+    { name: "Violett",farbe: "#b265ff", ziel: 10, koboldTempo: 2.4, erdbeeren: 3 },
+  ],
+};
+
+// Mögliche Blumenfarben, die als "falsche" Farben auftauchen
+const BLUMENFARBEN = ["#ff5566", "#4d8bff", "#ffd23f", "#b265ff", "#ff9f43", "#ff7ac0"];
+
+/* ========================================================================= */
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ---------- Spielzustand ---------- */
+let state = "start";            // start | playing | levelcomplete | won
+let levelIndex = 0;
+let einhorn, kobold, blumen, erdbeeren, magie, fortschritt, ziel, zielFarbe, zielName;
+let groesse;
+let target = { x: W/2, y: H/2 }; // wohin der Finger zeigt
+let unbesiegbarBis = 0;          // kurze Schonzeit nach Kobold-Treffer
+let partikel = [];               // kleine Sammel-Effekte
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+
+/* ---------- Objekte erzeugen ---------- */
+function neueBlume() {
+  // Typen: "ziel" = richtige Farbe, "falsch" = andere Farbe, "grau" = muss gefärbt werden
+  const r = Math.random();
+  let typ;
+  if (r < 0.45) typ = "ziel";
+  else if (r < 0.75) typ = "grau";
+  else typ = "falsch";
+
+  let farbe = zielFarbe;
+  if (typ === "falsch") {
+    do { farbe = BLUMENFARBEN[Math.floor(rand(0, BLUMENFARBEN.length))]; }
+    while (farbe === zielFarbe);
+  } else if (typ === "grau") {
+    farbe = "#c9c9d4";
+  }
+  return {
+    x: rand(60, W - 60),
+    y: rand(140, H - 80),
+    r: rand(20, 26),
+    typ, farbe,
+    wiegen: rand(0, Math.PI * 2),
+  };
+}
+
+function neueErdbeere() {
+  return { x: rand(60, W - 60), y: rand(140, H - 80), r: 16 };
+}
+
+function startLevel(i) {
+  levelIndex = i;
+  const L = CONFIG.level[i];
+  ziel = L.ziel; zielFarbe = L.farbe; zielName = L.name;
+  fortschritt = 0;
+  magie = CONFIG.magieStart;
+  groesse = CONFIG.einhornStartGroesse + i * CONFIG.wachstumProLevel;
+
+  einhorn = { x: W/2, y: H*0.7, vx: 0, vy: 0, blick: 1 };
+  target = { x: einhorn.x, y: einhorn.y };
+  kobold = { x: rand(60, W-60), y: 120, tempo: L.koboldTempo };
+
+  blumen = [];
+  for (let k = 0; k < CONFIG.blumenAufWiese; k++) blumen.push(neueBlume());
+  // Garantiere genug Zielblumen-Chancen: ein paar sicher richtige
+  for (let k = 0; k < 3; k++) blumen[k] = Object.assign(neueBlume(), { typ: "ziel", farbe: zielFarbe });
+
+  erdbeeren = [];
+  for (let k = 0; k < L.erdbeeren; k++) erdbeeren.push(neueErdbeere());
+
+  partikel = [];
+  state = "playing";
+  hide("startScreen"); hide("levelScreen"); hide("winScreen");
+}
+
+/* ---------- Eingabe (Finger + Maus) ---------- */
+function pointerMove(x, y) { target.x = x; target.y = y; }
+canvas.addEventListener("pointerdown", e => { pointerMove(e.clientX, e.clientY); });
+canvas.addEventListener("pointermove", e => { pointerMove(e.clientX, e.clientY); });
+canvas.addEventListener("touchmove", e => { e.preventDefault(); const t = e.touches[0]; pointerMove(t.clientX, t.clientY); }, { passive: false });
+
+/* ---------- Effekte ---------- */
+function funkeln(x, y, farbe) {
+  for (let i = 0; i < 8; i++) {
+    partikel.push({ x, y, vx: rand(-2,2), vy: rand(-2,2), leben: 30, farbe });
+  }
+}
+
+/* ---------- Update ---------- */
+function update() {
+  if (state !== "playing") return;
+  const now = performance.now();
+
+  // Einhorn sanft zum Ziel bewegen
+  const speed = 0.14;
+  einhorn.x += (target.x - einhorn.x) * speed;
+  einhorn.y += (target.y - einhorn.y) * speed;
+  if (target.x < einhorn.x - 1) einhorn.blick = -1;
+  else if (target.x > einhorn.x + 1) einhorn.blick = 1;
+
+  // Kobold jagt das Einhorn
+  const ang = Math.atan2(einhorn.y - kobold.y, einhorn.x - kobold.x);
+  kobold.x += Math.cos(ang) * kobold.tempo;
+  kobold.y += Math.sin(ang) * kobold.tempo;
+
+  // Blumen einsammeln
+  for (let b of blumen) {
+    b.wiegen += 0.05;
+    if (dist(einhorn.x, einhorn.y, b.x, b.y) < groesse + b.r) {
+      if (b.typ === "ziel") {
+        fortschritt++; funkeln(b.x, b.y, zielFarbe);
+        Object.assign(b, neueBlume());
+      } else if (b.typ === "grau") {
+        if (magie >= CONFIG.magieKostenFaerben) {
+          magie -= CONFIG.magieKostenFaerben;
+          fortschritt++; funkeln(b.x, b.y, zielFarbe);
+          Object.assign(b, neueBlume());
+        }
+        // zu wenig Magie -> Blume bleibt grau liegen
+      }
+      // falsche Farbe: passiert nichts
+    }
+  }
+
+  // Erdbeeren -> Magie auffüllen
+  for (let er of erdbeeren) {
+    if (dist(einhorn.x, einhorn.y, er.x, er.y) < groesse + er.r) {
+      magie = Math.min(100, magie + CONFIG.erdbeereGibtMagie);
+      funkeln(er.x, er.y, "#ff3b6b");
+      Object.assign(er, neueErdbeere());
+    }
+  }
+
+  // Kobold-Treffer
+  if (now > unbesiegbarBis && dist(einhorn.x, einhorn.y, kobold.x, kobold.y) < groesse + 22) {
+    if (fortschritt > 0) fortschritt--;
+    unbesiegbarBis = now + 1200;
+    // Kobold wegschubsen
+    kobold.x -= Math.cos(ang) * 120;
+    kobold.y -= Math.sin(ang) * 120;
+    funkeln(einhorn.x, einhorn.y, "#7a3fb0");
+  }
+
+  // Partikel
+  for (let p of partikel) { p.x += p.vx; p.y += p.vy; p.vy += 0.06; p.leben--; }
+  partikel = partikel.filter(p => p.leben > 0);
+
+  // Level geschafft?
+  if (fortschritt >= ziel) levelGeschafft();
+}
+
+function levelGeschafft() {
+  state = "levelcomplete";
+  const istLetztes = levelIndex >= CONFIG.level.length - 1;
+  if (istLetztes) {
+    show("winScreen");
+    state = "won";
+  } else {
+    document.getElementById("levelTitle").textContent = "Geschafft! 🌸";
+    document.getElementById("levelText").textContent =
+      "Dein Einhorn ist gewachsen! Im nächsten Level brauchst du " +
+      CONFIG.level[levelIndex+1].ziel + " " + CONFIG.level[levelIndex+1].name.toLowerCase() + "e Blumen.";
+    show("levelScreen");
+  }
+}
+
+/* ---------- Zeichnen ---------- */
+function drawBackground() {
+  // Himmel
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#bfe9ff"); g.addColorStop(1, "#e9fff0");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // Wiese
+  ctx.fillStyle = "#8fd96b";
+  ctx.beginPath();
+  ctx.moveTo(0, H*0.32);
+  ctx.bezierCurveTo(W*0.3, H*0.27, W*0.7, H*0.37, W, H*0.30);
+  ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+  // Sonne
+  ctx.fillStyle = "#fff3a8";
+  ctx.beginPath(); ctx.arc(W-70, 70, 38, 0, Math.PI*2); ctx.fill();
+}
+
+function drawFlower(b) {
+  const k = Math.sin(b.wiegen) * 2;
+  ctx.save(); ctx.translate(b.x + k, b.y);
+  // Stiel
+  ctx.strokeStyle = "#4ea84e"; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(0, b.r + 14); ctx.stroke();
+  // Blütenblätter
+  ctx.fillStyle = b.farbe;
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.ellipse(Math.cos(a) * b.r * 0.6, Math.sin(a) * b.r * 0.6, b.r*0.42, b.r*0.42, 0, 0, Math.PI*2);
+    ctx.fill();
+  }
+  // Mitte
+  ctx.fillStyle = "#fff1a8";
+  ctx.beginPath(); ctx.arc(0, 0, b.r*0.42, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawStrawberry(er) {
+  ctx.save(); ctx.translate(er.x, er.y);
+  ctx.fillStyle = "#ff3b6b";
+  ctx.beginPath();
+  ctx.moveTo(0, er.r);
+  ctx.bezierCurveTo(er.r*1.3, er.r*0.3, er.r, -er.r, 0, -er.r*0.4);
+  ctx.bezierCurveTo(-er.r, -er.r, -er.r*1.3, er.r*0.3, 0, er.r);
+  ctx.fill();
+  // Blatt
+  ctx.fillStyle = "#3fbf5f";
+  ctx.beginPath(); ctx.ellipse(0, -er.r*0.5, er.r*0.7, er.r*0.3, 0, 0, Math.PI*2); ctx.fill();
+  // Kerne
+  ctx.fillStyle = "#ffe27a";
+  for (let i=0;i<5;i++){ ctx.beginPath(); ctx.arc(rand(-er.r*0.5,er.r*0.5), rand(-er.r*0.2,er.r*0.6), 1.6, 0, Math.PI*2); ctx.fill(); }
+  ctx.restore();
+}
+
+function drawKobold() {
+  const blink = (performance.now() % 1000) < 120;
+  ctx.save(); ctx.translate(kobold.x, kobold.y);
+  ctx.fillStyle = "#6a3fb0";
+  ctx.beginPath();
+  ctx.moveTo(-22, 6);
+  ctx.bezierCurveTo(-26, -22, 26, -22, 22, 6);
+  // zackiger Rand
+  for (let i=4;i>=-4;i--){ ctx.lineTo(i*5.5, 12 + (i%2===0?0:7)); }
+  ctx.closePath(); ctx.fill();
+  // Hörnchen
+  ctx.beginPath(); ctx.moveTo(-14,-16); ctx.lineTo(-20,-28); ctx.lineTo(-8,-19); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(14,-16); ctx.lineTo(20,-28); ctx.lineTo(8,-19); ctx.fill();
+  // Augen
+  if (!blink) {
+    ctx.fillStyle = "#fff";
+    ctx.beginPath(); ctx.arc(-8,-2,6,0,Math.PI*2); ctx.arc(8,-2,6,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.arc(-7,-1,2.6,0,Math.PI*2); ctx.arc(9,-1,2.6,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawEinhorn() {
+  const s = groesse / 26;
+  const flip = einhorn.blick;
+  const now = performance.now();
+  const flackern = now < unbesiegbarBis && Math.floor(now/120)%2===0;
+  ctx.save();
+  ctx.translate(einhorn.x, einhorn.y);
+  ctx.scale(flip * s, s);
+  ctx.globalAlpha = flackern ? 0.4 : 1;
+
+  // Körper
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.ellipse(0, 6, 22, 16, 0, 0, Math.PI*2); ctx.fill();
+  // Beine
+  ctx.fillRect(-14, 16, 6, 12); ctx.fillRect(6, 16, 6, 12);
+  // Kopf
+  ctx.beginPath(); ctx.ellipse(16, -8, 12, 11, 0, 0, Math.PI*2); ctx.fill();
+  // Schnauze
+  ctx.beginPath(); ctx.ellipse(26, -4, 6, 5, 0, 0, Math.PI*2); ctx.fill();
+  // Horn
+  ctx.fillStyle = "#ffcf48";
+  ctx.beginPath(); ctx.moveTo(20, -18); ctx.lineTo(24, -34); ctx.lineTo(27, -17); ctx.closePath(); ctx.fill();
+  // Mähne (Regenbogen)
+  const mane = ["#ff5566","#ff9f43","#ffd23f","#4dd07a","#4d8bff","#b265ff"];
+  for (let i=0;i<mane.length;i++){
+    ctx.fillStyle = mane[i];
+    ctx.beginPath(); ctx.arc(6 - i*5, -12 + i*3, 6, 0, Math.PI*2); ctx.fill();
+  }
+  // Schweif
+  for (let i=0;i<mane.length;i++){
+    ctx.fillStyle = mane[i];
+    ctx.beginPath(); ctx.arc(-22, 0 + i*3, 5, 0, Math.PI*2); ctx.fill();
+  }
+  // Auge
+  ctx.fillStyle = "#3a2a4a";
+  ctx.beginPath(); ctx.arc(18, -9, 2.4, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+function drawHUD() {
+  // Zielanzeige oben
+  ctx.fillStyle = "rgba(255,255,255,0.85)";
+  roundRect(12, 12, Math.min(W-24, 360), 64, 18); ctx.fill();
+  // Beispielblume in Zielfarbe
+  ctx.save(); ctx.translate(44, 44);
+  for (let i=0;i<6;i++){ const a=(i/6)*Math.PI*2; ctx.fillStyle=zielFarbe;
+    ctx.beginPath(); ctx.arc(Math.cos(a)*9, Math.sin(a)*9, 6, 0, Math.PI*2); ctx.fill(); }
+  ctx.fillStyle="#fff1a8"; ctx.beginPath(); ctx.arc(0,0,6,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = "#5a2d82"; ctx.font = "bold 22px " + bodyFont();
+  ctx.textBaseline = "middle";
+  ctx.fillText(zielName + "e Blumen: " + fortschritt + " / " + ziel, 70, 36);
+  ctx.font = "16px " + bodyFont();
+  ctx.fillText("Level " + (levelIndex+1) + " / " + CONFIG.level.length, 70, 60);
+
+  // Magie-Leiste unten
+  const bw = Math.min(W-40, 300), bx = 20, by = H - 40;
+  ctx.fillStyle = "rgba(255,255,255,0.85)"; roundRect(bx-6, by-22, bw+12, 34, 16); ctx.fill();
+  ctx.fillStyle = "#e6d8f5"; roundRect(bx, by-12, bw, 16, 8); ctx.fill();
+  const mg = ctx.createLinearGradient(bx, 0, bx+bw, 0);
+  mg.addColorStop(0, "#b265ff"); mg.addColorStop(1, "#ff7ac0");
+  ctx.fillStyle = mg; roundRect(bx, by-12, bw*(magie/100), 16, 8); ctx.fill();
+  ctx.fillStyle = "#5a2d82"; ctx.font = "bold 16px " + bodyFont();
+  ctx.fillText("✨ Magie", bx, by - 30);
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y); ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r); ctx.arcTo(x, y, x+w, y, r); ctx.closePath();
+}
+function bodyFont(){ return '"Comic Sans MS","Chalkboard SE",system-ui,sans-serif'; }
+
+function draw() {
+  drawBackground();
+  if (state === "playing" || state === "levelcomplete" || state === "won") {
+    for (let er of erdbeeren) drawStrawberry(er);
+    for (let b of blumen) drawFlower(b);
+    drawKobold();
+    drawEinhorn();
+    for (let p of partikel) { ctx.globalAlpha = p.leben/30; ctx.fillStyle = p.farbe;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1; }
+    drawHUD();
+  }
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+loop();
+
+/* ---------- Bildschirme / Buttons ---------- */
+function show(id){ document.getElementById(id).classList.remove("hidden"); }
+function hide(id){ document.getElementById(id).classList.add("hidden"); }
+
+document.getElementById("startBtn").onclick = () => startLevel(0);
+document.getElementById("nextBtn").onclick = () => startLevel(levelIndex + 1);
+document.getElementById("againBtn").onclick = () => { hide("winScreen"); startLevel(0); };
+</script>
+</body>
+</html>

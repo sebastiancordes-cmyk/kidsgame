@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Drache im Weltraum</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #0b1030;
+    font-family: "Comic Sans MS", "Chalkboard SE", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: none;
+  }
+  #game { display: block; width: 100vw; height: 100vh; }
+  .overlay {
+    position: fixed; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; text-align: center;
+    color: #ffe9a8; padding: 24px; box-sizing: border-box;
+  }
+  .card {
+    background: rgba(20,18,55,0.92); border-radius: 28px; padding: 28px 32px;
+    max-width: 540px; box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+    border: 2px solid rgba(120,150,255,0.4);
+  }
+  h1 { font-size: clamp(28px, 6vw, 48px); margin: 0 0 8px; color: #ffd86b; }
+  p  { font-size: clamp(16px, 3.2vw, 22px); line-height: 1.4; margin: 8px 0; color: #d8e0ff; }
+  button {
+    margin-top: 18px; font-family: inherit; font-size: clamp(20px, 4vw, 26px);
+    background: #ff7a3c; color: white; border: none; border-radius: 999px;
+    padding: 14px 34px; box-shadow: 0 6px 0 #c8531f; cursor: pointer;
+  }
+  button:active { transform: translateY(4px); box-shadow: 0 2px 0 #c8531f; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="startScreen" class="overlay">
+  <div class="card">
+    <h1>🐉 Drache im Weltraum</h1>
+    <p>Steuere den kleinen Drachen mit dem Finger durchs All.</p>
+    <p>Sammle die <b>leuchtenden Sterne</b> ⭐. <b>Erloschene Sterne</b> 🌑 musst du erst mit <b>Feuer</b> 🔥 entzünden. Geht die Energie aus, sammle <b>Diamanten</b> 💎.</p>
+    <p>Pass auf den <b>Schatten-Kometen</b> ☄️ auf – er klaut dir Sterne!</p>
+    <button id="startBtn">Los geht's!</button>
+  </div>
+</div>
+
+<div id="levelScreen" class="overlay hidden">
+  <div class="card">
+    <h1 id="levelTitle">Geschafft! 🌟</h1>
+    <p id="levelText"></p>
+    <button id="nextBtn">Weiter</button>
+  </div>
+</div>
+
+<div id="winScreen" class="overlay hidden">
+  <div class="card">
+    <h1>🌈 Du hast gewonnen!</h1>
+    <p>Dein Drache ist groß und mächtig geworden und fliegt mit riesigen Flügeln durch die Galaxie.</p>
+    <button id="againBtn">Nochmal spielen</button>
+  </div>
+</div>
+
+<script>
+/* =========================================================================
+   EINSTELLUNGEN  –  hier dürfen die Kinder gerne Zahlen verändern!
+   ========================================================================= */
+const CONFIG = {
+  dracheStartGroesse:  26,     // wie groß das Baby-Drache startet
+  wachstumProLevel:    7,      // wie viel größer es pro Level wird
+  energieStart:        100,    // volle Feuer-Energie
+  energieKostenFeuer:  25,     // Energie-Kosten, um einen erloschenen Stern zu entzünden
+  diamantGibtEnergie:  40,     // wie viel Energie ein Diamant bringt
+  sterneImAll:         9,      // wie viele Sterne gleichzeitig schweben
+
+  // Die 3 Level. ziel = wie viele Sterne man sammeln muss.
+  level: [
+    { name: "Sternenstaub",  ziel: 6,  kometTempo: 1.4, diamanten: 2 },
+    { name: "Galaxie",       ziel: 8,  kometTempo: 1.9, diamanten: 2 },
+    { name: "Schwarzes Loch",ziel: 10, kometTempo: 2.4, diamanten: 3 },
+  ],
+};
+/* ========================================================================= */
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+}
+window.addEventListener("resize", resize);
+resize();
+
+/* ---------- Sternenhimmel-Hintergrund (Deko) ---------- */
+let bgSterne = [];
+function makeBgSterne() {
+  bgSterne = [];
+  for (let i = 0; i < 80; i++) bgSterne.push({ x: rand(0,W), y: rand(0,H), r: rand(0.5,1.8), t: rand(0,6) });
+}
+
+/* ---------- Spielzustand ---------- */
+let state = "start";            // start | playing | levelcomplete | won
+let levelIndex = 0;
+let drache, komet, sterne, diamanten, energie, fortschritt, ziel, zielName;
+let groesse;
+let target = { x: W/2, y: H/2 };
+let unbesiegbarBis = 0;
+let partikel = [];
+let feuerBis = 0;               // zeigt kurz eine Flamme am Drachen
+
+function rand(a, b) { return a + Math.random() * (b - a); }
+function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+
+makeBgSterne();
+window.addEventListener("resize", makeBgSterne);
+
+/* ---------- Objekte erzeugen ---------- */
+function neuerStern() {
+  // Typen: "hell" = leuchtet (direkt sammelbar), "dunkel" = erst mit Feuer entzünden
+  const r = Math.random();
+  const typ = r < 0.6 ? "hell" : "dunkel";
+  return {
+    x: rand(60, W - 60),
+    y: rand(140, H - 80),
+    r: rand(16, 22),
+    typ,
+    funkel: rand(0, Math.PI * 2),
+  };
+}
+function neuerDiamant() {
+  return { x: rand(60, W - 60), y: rand(140, H - 80), r: 15 };
+}
+
+function startLevel(i) {
+  levelIndex = i;
+  const L = CONFIG.level[i];
+  ziel = L.ziel; zielName = L.name;
+  fortschritt = 0;
+  energie = CONFIG.energieStart;
+  groesse = CONFIG.dracheStartGroesse + i * CONFIG.wachstumProLevel;
+
+  drache = { x: W/2, y: H*0.7, blick: 1, flap: 0 };
+  target = { x: drache.x, y: drache.y };
+  komet = { x: rand(60, W-60), y: 120, tempo: L.kometTempo };
+
+  sterne = [];
+  for (let k = 0; k < CONFIG.sterneImAll; k++) sterne.push(neuerStern());
+  for (let k = 0; k < 3; k++) sterne[k] = Object.assign(neuerStern(), { typ: "hell" });
+
+  diamanten = [];
+  for (let k = 0; k < L.diamanten; k++) diamanten.push(neuerDiamant());
+
+  partikel = [];
+  state = "playing";
+  hide("startScreen"); hide("levelScreen"); hide("winScreen");
+}
+
+/* ---------- Eingabe (Finger + Maus) ---------- */
+function pointerMove(x, y) { target.x = x; target.y = y; }
+canvas.addEventListener("pointerdown", e => pointerMove(e.clientX, e.clientY));
+canvas.addEventListener("pointermove", e => pointerMove(e.clientX, e.clientY));
+canvas.addEventListener("touchmove", e => { e.preventDefault(); const t = e.touches[0]; pointerMove(t.clientX, t.clientY); }, { passive: false });
+
+/* ---------- Effekte ---------- */
+function funkeln(x, y, farbe) {
+  for (let i = 0; i < 9; i++) partikel.push({ x, y, vx: rand(-2.4,2.4), vy: rand(-2.4,2.4), leben: 30, farbe });
+}
+
+/* ---------- Update ---------- */
+function update() {
+  if (state !== "playing") return;
+  const now = performance.now();
+
+  // Drache sanft zum Ziel
+  const speed = 0.14;
+  drache.x += (target.x - drache.x) * speed;
+  drache.y += (target.y - drache.y) * speed;
+  drache.flap += 0.3;
+  if (target.x < drache.x - 1) drache.blick = -1;
+  else if (target.x > drache.x + 1) drache.blick = 1;
+
+  // Komet jagt
+  const ang = Math.atan2(drache.y - komet.y, drache.x - komet.x);
+  komet.x += Math.cos(ang) * komet.tempo;
+  komet.y += Math.sin(ang) * komet.tempo;
+
+  // Sterne sammeln
+  for (let s of sterne) {
+    s.funkel += 0.08;
+    if (dist(drache.x, drache.y, s.x, s.y) < groesse + s.r) {
+      if (s.typ === "hell") {
+        fortschritt++; funkeln(s.x, s.y, "#ffe36b");
+        Object.assign(s, neuerStern());
+      } else { // dunkel -> Feuer nötig
+        if (energie >= CONFIG.energieKostenFeuer) {
+          energie -= CONFIG.energieKostenFeuer;
+          fortschritt++; feuerBis = now + 250; funkeln(s.x, s.y, "#ff8a3c");
+          Object.assign(s, neuerStern());
+        }
+        // zu wenig Energie -> Stern bleibt dunkel
+      }
+    }
+  }
+
+  // Diamanten -> Energie auffüllen
+  for (let d of diamanten) {
+    if (dist(drache.x, drache.y, d.x, d.y) < groesse + d.r) {
+      energie = Math.min(100, energie + CONFIG.diamantGibtEnergie);
+      funkeln(d.x, d.y, "#6bf0ff");
+      Object.assign(d, neuerDiamant());
+    }
+  }
+
+  // Komet-Treffer
+  if (now > unbesiegbarBis && dist(drache.x, drache.y, komet.x, komet.y) < groesse + 22) {
+    if (fortschritt > 0) fortschritt--;
+    unbesiegbarBis = now + 1200;
+    komet.x -= Math.cos(ang) * 120;
+    komet.y -= Math.sin(ang) * 120;
+    funkeln(drache.x, drache.y, "#9aa0ff");
+  }
+
+  for (let p of partikel) { p.x += p.vx; p.y += p.vy; p.vy += 0.05; p.leben--; }
+  partikel = partikel.filter(p => p.leben > 0);
+
+  if (fortschritt >= ziel) levelGeschafft();
+}
+
+function levelGeschafft() {
+  const istLetztes = levelIndex >= CONFIG.level.length - 1;
+  if (istLetztes) {
+    state = "won"; show("winScreen");
+  } else {
+    state = "levelcomplete";
+    document.getElementById("levelTitle").textContent = "Geschafft! 🌟";
+    document.getElementById("levelText").textContent =
+      "Dein Drache ist gewachsen und hat größere Flügel! Im nächsten Level brauchst du " +
+      CONFIG.level[levelIndex+1].ziel + " Sterne.";
+    show("levelScreen");
+  }
+}
+
+/* ---------- Zeichnen ---------- */
+function drawBackground() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#0b1030"); g.addColorStop(1, "#2a1a4a");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // funkelnde Hintergrundsterne
+  const now = performance.now() / 600;
+  for (let s of bgSterne) {
+    ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(now + s.t));
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // Planet
+  const pg = ctx.createRadialGradient(70, H-60, 10, 70, H-60, 70);
+  pg.addColorStop(0, "#ff9f6b"); pg.addColorStop(1, "#a33b6b");
+  ctx.fillStyle = pg;
+  ctx.beginPath(); ctx.arc(70, H-50, 55, 0, Math.PI*2); ctx.fill();
+}
+
+function drawStar(s) {
+  const blink = s.typ === "hell" ? (0.7 + 0.3*Math.sin(s.funkel)) : 1;
+  ctx.save(); ctx.translate(s.x, s.y);
+  if (s.typ === "hell") {
+    ctx.shadowColor = "#ffe36b"; ctx.shadowBlur = 16;
+    ctx.fillStyle = "#ffe36b";
+  } else {
+    ctx.fillStyle = "#4a4a66";
+  }
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const ang = (Math.PI/5) * i - Math.PI/2;
+    const rad = (i % 2 === 0) ? s.r * blink : s.r * 0.45 * blink;
+    ctx.lineTo(Math.cos(ang)*rad, Math.sin(ang)*rad);
+  }
+  ctx.closePath(); ctx.fill();
+  if (s.typ === "dunkel") { // kleines Glimmen, damit man sie sieht
+    ctx.shadowBlur = 0; ctx.strokeStyle = "#6a6a8a"; ctx.lineWidth = 2; ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawDiamant(d) {
+  ctx.save(); ctx.translate(d.x, d.y);
+  ctx.shadowColor = "#6bf0ff"; ctx.shadowBlur = 14;
+  ctx.fillStyle = "#7fe9ff";
+  ctx.beginPath();
+  ctx.moveTo(0, -d.r); ctx.lineTo(d.r*0.8, -d.r*0.2);
+  ctx.lineTo(0, d.r); ctx.lineTo(-d.r*0.8, -d.r*0.2); ctx.closePath(); ctx.fill();
+  ctx.shadowBlur = 0; ctx.strokeStyle = "#d6fbff"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(-d.r*0.8,-d.r*0.2); ctx.lineTo(d.r*0.8,-d.r*0.2);
+  ctx.moveTo(0,-d.r); ctx.lineTo(0,d.r); ctx.stroke();
+  ctx.restore();
+}
+
+function drawKomet() {
+  ctx.save(); ctx.translate(komet.x, komet.y);
+  // Schweif
+  ctx.fillStyle = "rgba(150,160,255,0.35)";
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(40,-12); ctx.lineTo(44,10); ctx.closePath(); ctx.fill();
+  // Kopf
+  ctx.fillStyle = "#3a2a5a";
+  ctx.beginPath(); ctx.arc(0, 0, 20, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = "#5a3a7a";
+  ctx.beginPath(); ctx.arc(-4,-4,8,0,Math.PI*2); ctx.fill();
+  // böse Augen
+  const blink = (performance.now() % 1100) < 120;
+  if (!blink) {
+    ctx.fillStyle = "#ff5a5a";
+    ctx.beginPath(); ctx.arc(-6,-2,4,0,Math.PI*2); ctx.arc(7,-2,4,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawDrache() {
+  const sc = groesse / 26;
+  const flip = drache.blick;
+  const now = performance.now();
+  const flackern = now < unbesiegbarBis && Math.floor(now/120)%2===0;
+  const wing = Math.sin(drache.flap) * 10;
+  ctx.save();
+  ctx.translate(drache.x, drache.y);
+  ctx.scale(flip * sc, sc);
+  ctx.globalAlpha = flackern ? 0.4 : 1;
+
+  // Flügel (hinten) – wachsen mit der Größe automatisch über Scale
+  ctx.fillStyle = "#3fa9ff";
+  ctx.beginPath();
+  ctx.moveTo(-4, 0);
+  ctx.quadraticCurveTo(-30, -20 - wing, -34, 4 - wing*0.4);
+  ctx.quadraticCurveTo(-22, 2, -4, 8); ctx.closePath(); ctx.fill();
+
+  // Schweif
+  ctx.strokeStyle = "#2bb673"; ctx.lineWidth = 6; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(-10, 8); ctx.quadraticCurveTo(-28, 16, -30, 2); ctx.stroke();
+  // Schweifspitze
+  ctx.fillStyle = "#2bb673";
+  ctx.beginPath(); ctx.moveTo(-30, -3); ctx.lineTo(-38, 2); ctx.lineTo(-30, 7); ctx.fill();
+
+  // Körper
+  ctx.fillStyle = "#34d17a";
+  ctx.beginPath(); ctx.ellipse(0, 6, 20, 15, 0, 0, Math.PI*2); ctx.fill();
+  // Bauch
+  ctx.fillStyle = "#bff5d6";
+  ctx.beginPath(); ctx.ellipse(2, 10, 12, 9, 0, 0, Math.PI*2); ctx.fill();
+  // Kopf
+  ctx.fillStyle = "#34d17a";
+  ctx.beginPath(); ctx.ellipse(16, -6, 12, 11, 0, 0, Math.PI*2); ctx.fill();
+  // Schnauze
+  ctx.beginPath(); ctx.ellipse(26, -2, 6, 5, 0, 0, Math.PI*2); ctx.fill();
+  // Hörnchen
+  ctx.fillStyle = "#1f8f57";
+  ctx.beginPath(); ctx.moveTo(12,-16); ctx.lineTo(9,-26); ctx.lineTo(17,-17); ctx.fill();
+  // Auge
+  ctx.fillStyle = "#13343f";
+  ctx.beginPath(); ctx.arc(18, -7, 2.6, 0, Math.PI*2); ctx.fill();
+
+  // Flügel (vorne)
+  ctx.fillStyle = "#5bc0ff";
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.quadraticCurveTo(-18, -26 - wing, -10, 2 - wing*0.5);
+  ctx.quadraticCurveTo(-6, 0, 0, 6); ctx.closePath(); ctx.fill();
+
+  // Feuer speien (kurz nach dem Entzünden)
+  if (now < feuerBis) {
+    ctx.fillStyle = "#ffd23f";
+    ctx.beginPath(); ctx.moveTo(31,-2); ctx.lineTo(50, -6); ctx.lineTo(46, 0); ctx.lineTo(54, 2); ctx.lineTo(44, 5); ctx.lineTo(50, 9); ctx.lineTo(31, 4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = "#ff7a3c";
+    ctx.beginPath(); ctx.moveTo(31,-1); ctx.lineTo(44,-3); ctx.lineTo(42,2); ctx.lineTo(46,4); ctx.lineTo(31,4); ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawHUD() {
+  ctx.fillStyle = "rgba(20,18,55,0.8)";
+  roundRect(12, 12, Math.min(W-24, 360), 64, 18); ctx.fill();
+  // Stern-Symbol
+  ctx.save(); ctx.translate(40, 44);
+  ctx.fillStyle = "#ffe36b";
+  ctx.beginPath();
+  for (let i=0;i<10;i++){ const a=(Math.PI/5)*i-Math.PI/2; const r=(i%2===0)?12:5.4; ctx.lineTo(Math.cos(a)*r, Math.sin(a)*r); }
+  ctx.closePath(); ctx.fill(); ctx.restore();
+
+  ctx.fillStyle = "#ffe9a8"; ctx.font = "bold 22px " + bodyFont(); ctx.textBaseline = "middle";
+  ctx.fillText("Sterne: " + fortschritt + " / " + ziel, 64, 36);
+  ctx.font = "16px " + bodyFont(); ctx.fillStyle = "#cdd6ff";
+  ctx.fillText("Level " + (levelIndex+1) + " / " + CONFIG.level.length + " · " + zielName, 64, 60);
+
+  // Energie-Leiste
+  const bw = Math.min(W-40, 300), bx = 20, by = H - 40;
+  ctx.fillStyle = "rgba(20,18,55,0.8)"; roundRect(bx-6, by-22, bw+12, 34, 16); ctx.fill();
+  ctx.fillStyle = "#3a2a2a"; roundRect(bx, by-12, bw, 16, 8); ctx.fill();
+  const mg = ctx.createLinearGradient(bx, 0, bx+bw, 0);
+  mg.addColorStop(0, "#ff3c1f"); mg.addColorStop(1, "#ffd23f");
+  ctx.fillStyle = mg; roundRect(bx, by-12, bw*(energie/100), 16, 8); ctx.fill();
+  ctx.fillStyle = "#ffe9a8"; ctx.font = "bold 16px " + bodyFont();
+  ctx.fillText("🔥 Feuer-Energie", bx, by - 30);
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y); ctx.arcTo(x+w, y, x+w, y+h, r); ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r); ctx.arcTo(x, y, x+w, y, r); ctx.closePath();
+}
+function bodyFont(){ return '"Comic Sans MS","Chalkboard SE",system-ui,sans-serif'; }
+
+function draw() {
+  drawBackground();
+  if (state === "playing" || state === "levelcomplete" || state === "won") {
+    for (let d of diamanten) drawDiamant(d);
+    for (let s of sterne) drawStar(s);
+    drawKomet();
+    drawDrache();
+    for (let p of partikel) { ctx.globalAlpha = p.leben/30; ctx.fillStyle = p.farbe;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1; }
+    drawHUD();
+  }
+}
+
+function loop() { update(); draw(); requestAnimationFrame(loop); }
+loop();
+
+/* ---------- Bildschirme / Buttons ---------- */
+function show(id){ document.getElementById(id).classList.remove("hidden"); }
+function hide(id){ document.getElementById(id).classList.add("hidden"); }
+
+document.getElementById("startBtn").onclick = () => startLevel(0);
+document.getElementById("nextBtn").onclick = () => startLevel(levelIndex + 1);
+document.getElementById("againBtn").onclick = () => { hide("winScreen"); startLevel(0); };
+</script>
+</body>
+</html>
