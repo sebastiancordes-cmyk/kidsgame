@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+<title>Magisches Abenteuer</title>
+<style>
+  :root { --accent: #ff9ecf; --accent2: #e07ab0; --ink: #5a4a78; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden; background: #efe7ff;
+    font-family: "Comic Sans MS", "Chalkboard SE", "Baloo 2", system-ui, sans-serif;
+    -webkit-user-select: none; user-select: none; touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #game { display: block; width: 100vw; height: 100vh; }
+  .overlay {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 18px; box-sizing: border-box; overflow-y: auto;
+    animation: fade .35s ease;
+  }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes pop  { 0% { transform: scale(.7); } 70% { transform: scale(1.06); } 100% { transform: scale(1); } }
+  .card {
+    background: rgba(255,255,255,0.92); border-radius: 30px; padding: 24px 26px;
+    max-width: 560px; width: 100%; color: var(--ink); animation: pop .4s ease;
+    box-shadow: 0 16px 44px rgba(120,90,170,0.35); border: 3px solid rgba(255,255,255,0.7);
+    backdrop-filter: blur(4px);
+  }
+  h1 { font-size: clamp(24px, 5.5vw, 40px); margin: 0 0 6px; letter-spacing: .5px; }
+  .label { font-size: clamp(15px, 3vw, 19px); font-weight: bold; margin: 16px 0 8px; color: #8a6fb3; }
+  .choices { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .choice {
+    flex: 1 1 120px; min-width: 110px; background: #f4ecff; border: 3px solid transparent;
+    border-radius: 22px; padding: 14px 8px; font-family: inherit; font-size: 36px;
+    color: var(--ink); cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    transition: transform .12s ease, background .15s ease, box-shadow .15s ease;
+  }
+  .choice span { font-size: 15px; font-weight: bold; }
+  .choice.sel { border-color: var(--accent); background: #ffe6f4; box-shadow: 0 6px 0 var(--accent2); transform: translateY(-2px); }
+  .stepper { display: flex; align-items: center; justify-content: center; gap: 18px; }
+  .stepper button { font-size: 28px; width: 54px; height: 54px; border-radius: 50%; padding: 0; }
+  .stepper span { font-size: 32px; font-weight: bold; min-width: 44px; }
+  .row { display: flex; gap: 12px; justify-content: center; margin-top: 22px; flex-wrap: wrap; }
+  button.big, .row button, button.primary, .stepper button {
+    font-family: inherit; font-size: clamp(18px, 3.6vw, 24px); background: var(--accent);
+    color: white; border: none; border-radius: 999px; padding: 14px 28px;
+    box-shadow: 0 6px 0 var(--accent2); cursor: pointer;
+  }
+  button.secondary { background: #c4b0e6; box-shadow: 0 6px 0 #a087c9; }
+  button:active { transform: translateY(4px); box-shadow: 0 2px 0 var(--accent2) !important; }
+  .hidden { display: none !important; }
+  .stars { font-size: 46px; letter-spacing: 6px; margin: 6px 0 2px; }
+  .stars .on { color: #ffce4a; text-shadow: 0 2px 6px rgba(255,180,40,.5); }
+  .stars .off { color: #e2d8f0; }
+  #menuBtn {
+    position: fixed; top: 12px; right: 12px; z-index: 5; font-family: inherit;
+    background: rgba(90,74,120,0.5); color: #fff; border: none; border-radius: 16px;
+    padding: 9px 16px; font-size: 18px; cursor: pointer; backdrop-filter: blur(3px);
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<button id="menuBtn" class="hidden">≡ Menü</button>
+
+<!-- HAUPTMENÜ -->
+<div id="menu" class="overlay">
+  <div class="card">
+    <h1>✨ Magisches Abenteuer ✨</h1>
+    <div class="label">Wähle deine Figur</div>
+    <div class="choices" id="figurChoices">
+      <button class="choice" data-group="figur" data-val="drache">🐉<span>Drache</span></button>
+      <button class="choice" data-group="figur" data-val="einhorn">🦄<span>Einhorn</span></button>
+    </div>
+    <div class="label">Wähle deine Welt</div>
+    <div class="choices" id="weltChoices">
+      <button class="choice" data-group="welt" data-val="weltraum">🌌<span>Weltraum</span></button>
+      <button class="choice" data-group="welt" data-val="blumenwiese">🌼<span>Blumenwiese</span></button>
+    </div>
+    <div class="row">
+      <button id="settingsBtn" class="secondary">⚙️ Einstellungen</button>
+      <button id="playBtn">▶ Los geht's!</button>
+    </div>
+  </div>
+</div>
+
+<!-- EINSTELLUNGEN -->
+<div id="settings" class="overlay hidden">
+  <div class="card">
+    <h1>⚙️ Einstellungen</h1>
+    <div class="label">Anzahl Level: wie weit das Abenteuer geht</div>
+    <div class="stepper">
+      <button id="lvlMinus">−</button><span id="lvlVal">3</span><button id="lvlPlus">+</button>
+    </div>
+    <div class="label">Wildheit: wie viel auf der Welt los ist</div>
+    <div class="choices">
+      <button class="choice" data-group="wild" data-val="ruhig">😌<span>Ruhig</span></button>
+      <button class="choice" data-group="wild" data-val="normal">🙂<span>Normal</span></button>
+      <button class="choice" data-group="wild" data-val="wild">😼<span>Wild</span></button>
+    </div>
+    <div class="label">Schwierigkeit: passend zum Alter</div>
+    <div class="choices">
+      <button class="choice" data-group="diff" data-val="leicht">🟢<span>Leicht 4–6</span></button>
+      <button class="choice" data-group="diff" data-val="mittel">🟡<span>Mittel</span></button>
+      <button class="choice" data-group="diff" data-val="schwer">🔴<span>Schwer 7–10</span></button>
+    </div>
+    <div class="row"><button id="settingsBack">✔ Fertig</button></div>
+  </div>
+</div>
+
+<!-- LEVEL GESCHAFFT -->
+<div id="levelScreen" class="overlay hidden">
+  <div class="card">
+    <h1 id="levelTitle">Geschafft! 🌟</h1>
+    <div class="stars" id="levelStars"></div>
+    <p id="levelText" style="font-size:clamp(16px,3.2vw,20px)"></p>
+    <div class="row"><button id="nextBtn">Weiter ▶</button></div>
+  </div>
+</div>
+
+<!-- GEWONNEN -->
+<div id="winScreen" class="overlay hidden">
+  <div class="card">
+    <h1>🌈 Du hast gewonnen!</h1>
+    <div class="stars" id="winStars"></div>
+    <p id="winText" style="font-size:clamp(16px,3.2vw,20px)"></p>
+    <div class="row"><button id="againBtn">Nochmal ▶</button></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+   EINSTELLUNGEN-VORGABEN  –  Kinder dürfen hier Zahlen verändern!
+   ========================================================================= */
+const BASIS = {
+  startGroesse: 26, wachstumProLevel: 7,
+  ressourceStart: 100, sammelObjekte: 9,
+  diff: {
+    leicht: { figSpeed: 0.17, gegnerBasis: 1.0, baseZiel: 4, zielStep: 1, kosten: 18 },
+    mittel: { figSpeed: 0.14, gegnerBasis: 1.5, baseZiel: 6, zielStep: 1, kosten: 25 },
+    schwer: { figSpeed: 0.13, gegnerBasis: 2.1, baseZiel: 8, zielStep: 2, kosten: 30 },
+  },
+  wild: {
+    ruhig:  { tempoMult: 0.85, gegner: 1, deko: 0 },
+    normal: { tempoMult: 1.0,  gegner: 1, deko: 2 },
+    wild:   { tempoMult: 1.25, gegner: 2, deko: 4 },
+  },
+};
+
+// Themen (Welt) – weiche Pastellfarben
+const THEMA = {
+  weltraum: {
+    bgTop: "#5b4d96", bgBottom: "#bcaee8", sterneDeko: true, planet: true,
+    zielName: "Sterne", ressName: "🔥 Feuer-Energie", farbModus: false,
+    zielFarbe: "#fff0b8", ressFarbe1: "#ffb38a", ressFarbe2: "#ffe1a8",
+    nachschubEmoji: "💎", funkelFarbe: "#ffd6a0",
+  },
+  blumenwiese: {
+    bgTop: "#cdeeff", bgBottom: "#eafff2", sterneDeko: false, planet: false,
+    zielName: "Blumen", ressName: "✨ Magie", farbModus: true,
+    ressFarbe1: "#cbaaf2", ressFarbe2: "#ffc3e2",
+    nachschubEmoji: "🍓", funkelFarbe: "#ff9ec9",
+    farben: ["#ff9aa9", "#9ac1ff", "#ffe39a", "#cdb0ff", "#ffc09a"],
+    farbNamen: { "#ff9aa9":"rote", "#9ac1ff":"blaue", "#ffe39a":"gelbe", "#cdb0ff":"lila", "#ffc09a":"orange" },
+  },
+};
+/* ========================================================================= */
+
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+let W = 0, H = 0, DPR = 1;
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = W * DPR; canvas.height = H * DPR;
+  canvas.style.width = W + "px"; canvas.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  makeBgSterne(); makeWolken(); makeFloaters();
+}
+function rand(a, b) { return a + Math.random() * (b - a); }
+function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+/* ---------- Auswahl + Einstellungen ---------- */
+const wahl = { figur: "drache", welt: "weltraum", wild: "normal", diff: "mittel", anzahlLevel: 3 };
+
+/* ---------- Spielzustand ---------- */
+let state = "menu";
+let levelPlan = [], levelIndex = 0;
+let T;
+let held, gegnerListe, objekte, nachschub, ressource, fortschritt, ziel, groesse;
+let zielFarbe = null, zielFarbName = "";
+let target = { x: 0, y: 0 };
+let unbesiegbarBis = 0, effektBis = 0, levelStartZeit = 0;
+let treffer = 0, gesammelteSterne = 0, maxSterne = 0;
+
+// Effekt-Sammlungen
+let partikel = [], ringe = [], popups = [], konfetti = [];
+let bgSterne = [], wolken = [], floaters = [], nebel = [];
+
+function makeBgSterne() { bgSterne = []; for (let i=0;i<70;i++) bgSterne.push({ x: rand(0,W), y: rand(0,H*0.85), r: rand(0.6,2), t: rand(0,6) });
+  nebel = [ { x: rand(0,W), y: rand(0,H*0.5), r: rand(120,200), c: "rgba(255,190,230,0.10)" },
+            { x: rand(0,W), y: rand(0,H*0.6), r: rand(140,220), c: "rgba(180,200,255,0.10)" } ]; }
+function makeWolken() { wolken = []; for (let i=0;i<5;i++) wolken.push({ x: rand(0,W), y: rand(40,H*0.32), s: rand(0.7,1.4), sp: rand(6,16) }); }
+function makeFloaters() { floaters = []; const typen=["stern","herz","blume"]; for (let i=0;i<14;i++) floaters.push({ x: rand(0,W), y: rand(0,H), s: rand(10,22), sp: rand(8,22), t: typen[i%3], hue: rand(0,360), ph: rand(0,6.28) }); }
+
+/* ---------- Level-Plan ---------- */
+function baueLevelPlan() {
+  const d = BASIS.diff[wahl.diff], w = BASIS.wild[wahl.wild];
+  levelPlan = [];
+  for (let i=0;i<wahl.anzahlLevel;i++) {
+    levelPlan.push({
+      ziel: d.baseZiel + i*d.zielStep,
+      gegnerTempo: d.gegnerBasis * w.tempoMult * (1 + i*0.12),
+      gegnerAnzahl: w.gegner, deko: w.deko, nachschub: 2 + Math.floor(i/3),
+    });
+  }
+}
+
+/* ---------- Objekte ---------- */
+function zufallFalschFarbe() { const f = THEMA.blumenwiese.farben; let c; do { c = f[Math.floor(rand(0,f.length))]; } while (c === zielFarbe); return c; }
+function neuesObjekt(level) {
+  const r = Math.random();
+  let kind = r < 0.5 ? "ziel" : (r < 0.85 ? "gesperrt" : "deko");
+  if (kind === "deko" && level.deko === 0) kind = "ziel";
+  let farbe = null;
+  if (T.farbModus) farbe = kind==="ziel" ? zielFarbe : (kind==="gesperrt" ? "#d7d2e2" : zufallFalschFarbe());
+  return { x: rand(60, W-60), y: rand(150, H-90), r: rand(18,24), kind, farbe, phase: rand(0,6.28), spawn: performance.now() };
+}
+function neuerNachschub() { return { x: rand(60,W-60), y: rand(150,H-90), r: 15, phase: rand(0,6.28) }; }
+
+function startLevel(i) {
+  if (i < 0 || i >= levelPlan.length) { gotoMenu(); return; }
+  levelIndex = i;
+  const L = levelPlan[i];
+  T = THEMA[wahl.welt];
+  ziel = L.ziel; fortschritt = 0; treffer = 0;
+  ressource = BASIS.ressourceStart;
+  groesse = BASIS.startGroesse + i*BASIS.wachstumProLevel;
+  levelStartZeit = performance.now();
+
+  if (T.farbModus) { zielFarbe = T.farben[i % T.farben.length]; zielFarbName = T.farbNamen[zielFarbe]; }
+  else { zielFarbe = T.zielFarbe; zielFarbName = ""; }
+
+  held = { x: W/2, y: H*0.7, blick: 1, flap: 0 };
+  target = { x: held.x, y: held.y };
+
+  gegnerListe = [];
+  for (let g=0; g<L.gegnerAnzahl; g++) gegnerListe.push({ x: rand(60,W-60), y: 110+g*40, tempo: L.gegnerTempo });
+
+  objekte = [];
+  for (let k=0;k<BASIS.sammelObjekte+L.deko;k++) objekte.push(neuesObjekt(L));
+  for (let k=0;k<3;k++) { objekte[k].kind="ziel"; if (T.farbModus) objekte[k].farbe=zielFarbe; }
+
+  nachschub = [];
+  for (let k=0;k<L.nachschub;k++) nachschub.push(neuerNachschub());
+
+  partikel=[]; ringe=[]; popups=[]; konfetti=[]; unbesiegbarBis=0; effektBis=0;
+  state = "playing";
+  hideAll(); document.getElementById("menuBtn").classList.remove("hidden");
+}
+
+function gotoMenu() { state="menu"; hideAll(); show("menu"); document.getElementById("menuBtn").classList.add("hidden"); }
+
+/* ---------- Eingabe ---------- */
+function pointerMove(x,y){ target.x=x; target.y=y; }
+canvas.addEventListener("pointerdown", e => pointerMove(e.clientX,e.clientY));
+canvas.addEventListener("pointermove", e => pointerMove(e.clientX,e.clientY));
+canvas.addEventListener("touchmove", e => { e.preventDefault(); const t=e.touches[0]; if(t) pointerMove(t.clientX,t.clientY); }, { passive:false });
+
+/* ---------- Effekt-Helfer ---------- */
+function funkeln(x,y,farbe,n){ n=n||10; for(let i=0;i<n;i++) partikel.push({ x,y, vx:rand(-2.6,2.6), vy:rand(-2.6,2.6), leben:rand(22,34), max:34, farbe, r:rand(2,4) }); }
+function ring(x,y,farbe){ ringe.push({ x,y, r:8, maxR:46, leben:26, maxLeben:26, farbe }); }
+function popText(x,y,text,farbe){ popups.push({ x,y, text, farbe, leben:46, max:46 }); }
+function spawnKonfetti(n){ const cols=["#ff9ecf","#9ac1ff","#ffe39a","#b6f0c0","#cdb0ff","#ffc09a"]; for(let i=0;i<n;i++) konfetti.push({ x:rand(0,W), y:rand(-40,0), vx:rand(-1.5,1.5), vy:rand(1.5,4), rot:rand(0,6.28), vr:rand(-0.2,0.2), c:cols[i%cols.length], w:rand(6,11), h:rand(8,14), leben:rand(120,200) }); }
+
+/* ---------- Update ---------- */
+function update() {
+  if (state !== "playing") return;
+  const now = performance.now();
+  const d = BASIS.diff[wahl.diff];
+
+  held.x += (target.x - held.x) * d.figSpeed;
+  held.y += (target.y - held.y) * d.figSpeed;
+  held.flap += 0.3;
+  if (target.x < held.x-1) held.blick=-1; else if (target.x > held.x+1) held.blick=1;
+  // Funken-Spur
+  if (Math.random() < 0.4) partikel.push({ x: held.x+rand(-6,6), y: held.y+rand(-6,6), vx: rand(-0.4,0.4), vy: rand(-0.4,0.4), leben: rand(14,22), max:22, farbe: T.farbModus ? "#ffd9f0" : "#fff0c8", r: rand(1.5,2.6) });
+
+  for (let g of gegnerListe) {
+    const ang = Math.atan2(held.y-g.y, held.x-g.x);
+    g.x += Math.cos(ang)*g.tempo; g.y += Math.sin(ang)*g.tempo;
+    if (now > unbesiegbarBis && dist(held.x,held.y,g.x,g.y) < groesse+22) {
+      if (fortschritt>0) fortschritt--;
+      treffer++; unbesiegbarBis = now+1200;
+      g.x -= Math.cos(ang)*120; g.y -= Math.sin(ang)*120;
+      funkeln(held.x, held.y, "#b9a0ff", 12); popText(held.x, held.y-groesse-6, "-1", "#ff6f91");
+    }
+  }
+
+  const L = levelPlan[levelIndex];
+  for (let o of objekte) {
+    o.phase += 0.06;
+    if (dist(held.x,held.y,o.x,o.y) < groesse+o.r) {
+      if (o.kind === "ziel") {
+        fortschritt++; funkeln(o.x,o.y, T.farbModus?zielFarbe:T.zielFarbe); ring(o.x,o.y, T.farbModus?zielFarbe:"#ffe7a0"); popText(o.x,o.y,"+1", "#7bd88f");
+        Object.assign(o, neuesObjekt(L));
+      } else if (o.kind === "gesperrt") {
+        if (ressource >= d.kosten) {
+          ressource -= d.kosten; fortschritt++; effektBis = now+260;
+          funkeln(o.x,o.y, T.funkelFarbe); ring(o.x,o.y, T.funkelFarbe); popText(o.x,o.y,"+1", "#7bd88f");
+          Object.assign(o, neuesObjekt(L));
+        }
+      }
+    }
+  }
+
+  for (let nch of nachschub) {
+    nch.phase += 0.05;
+    if (dist(held.x,held.y,nch.x,nch.y) < groesse+nch.r) {
+      ressource = Math.min(100, ressource+40);
+      funkeln(nch.x,nch.y, T.ressFarbe2); ring(nch.x,nch.y, T.ressFarbe2); popText(nch.x,nch.y,"✨", T.ressFarbe1);
+      Object.assign(nch, neuerNachschub());
+    }
+  }
+
+  if (fortschritt >= ziel) levelGeschafft();
+}
+
+// Effekte laufen immer (auch auf Sieg-/Level-Bildschirm)
+function updateEffekte() {
+  for (let p of partikel) { p.x+=p.vx; p.y+=p.vy; p.vy+=0.05; p.leben--; }
+  partikel = partikel.filter(p=>p.leben>0);
+  for (let r of ringe) { r.r += (r.maxR-r.r)*0.18; r.leben--; }
+  ringe = ringe.filter(r=>r.leben>0);
+  for (let p of popups) { p.y -= 0.8; p.leben--; }
+  popups = popups.filter(p=>p.leben>0);
+  for (let k of konfetti) { k.x+=k.vx; k.y+=k.vy; k.vy+=0.04; k.rot+=k.vr; k.leben--; }
+  konfetti = konfetti.filter(k=>k.leben>0 && k.y < H+40);
+  // Deko-Bewegung
+  const dt = 1;
+  for (let c of wolken) { c.x += c.sp*0.01*dt; if (c.x > W+120) c.x = -120; }
+  for (let f of floaters) { f.y -= f.sp*0.012*dt; f.ph += 0.02; if (f.y < -30) { f.y = H+30; f.x = rand(0,W); } }
+}
+
+function sterneFuerLevel() { return treffer===0 ? 3 : (treffer<=2 ? 2 : 1); }
+
+function levelGeschafft() {
+  const s = sterneFuerLevel();
+  gesammelteSterne += s; maxSterne += 3;
+  spawnKonfetti(90);
+  if (levelIndex >= levelPlan.length-1) {
+    state = "won";
+    setStars("winStars", Math.round(gesammelteSterne/Math.max(1,levelPlan.length)));
+    document.getElementById("winText").textContent =
+      "Deine Figur ist groß und mächtig geworden! Du hast " + gesammelteSterne + " von " + maxSterne + " ⭐ gesammelt.";
+    show("winScreen"); document.getElementById("menuBtn").classList.add("hidden");
+  } else {
+    state = "levelcomplete";
+    setStars("levelStars", s);
+    const w = THEMA[wahl.welt], nx = levelPlan[levelIndex+1];
+    const wort = w.farbModus ? (w.farbNamen[w.farben[(levelIndex+1)%w.farben.length]] + " Blumen") : "Sterne";
+    document.getElementById("levelTitle").textContent = "Geschafft! 🌟";
+    document.getElementById("levelText").textContent = "Deine Figur ist gewachsen! Im nächsten Level brauchst du " + nx.ziel + " " + wort + ".";
+    show("levelScreen"); document.getElementById("menuBtn").classList.add("hidden");
+  }
+}
+function setStars(id, n) {
+  let h = ""; for (let i=0;i<3;i++) h += '<span class="' + (i<n?"on":"off") + '">★</span>';
+  document.getElementById(id).innerHTML = h;
+}
+
+/* ---------- Zeichnen: Hintergründe ---------- */
+function himmel(top, bottom) { const g=ctx.createLinearGradient(0,0,0,H); g.addColorStop(0,top); g.addColorStop(1,bottom); ctx.fillStyle=g; ctx.fillRect(0,0,W,H); }
+
+function drawMenuScene() {
+  himmel("#d9c8ff", "#ffe3f4");
+  const now = performance.now();
+  for (let f of floaters) {
+    ctx.save(); ctx.translate(f.x + Math.sin(f.ph)*8, f.y); ctx.globalAlpha = 0.55;
+    if (f.t==="stern") { ctx.fillStyle="#fff3b0"; sternPfad(f.s); ctx.fill(); }
+    else if (f.t==="herz") { ctx.fillStyle="#ffb3d6"; herzPfad(f.s); }
+    else { ctx.fillStyle="#c7e8ff"; blumePfad(f.s); }
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+}
+function sternPfad(s){ ctx.beginPath(); for(let i=0;i<10;i++){ const a=(Math.PI/5)*i-Math.PI/2; const r=(i%2===0)?s:s*0.45; ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);} ctx.closePath(); }
+function herzPfad(s){ ctx.beginPath(); ctx.moveTo(0,s*0.7); ctx.bezierCurveTo(s,0,s*0.5,-s,0,-s*0.3); ctx.bezierCurveTo(-s*0.5,-s,-s,0,0,s*0.7); ctx.fill(); }
+function blumePfad(s){ for(let i=0;i<5;i++){ const a=(i/5)*Math.PI*2; ctx.beginPath(); ctx.arc(Math.cos(a)*s*0.6,Math.sin(a)*s*0.6,s*0.42,0,Math.PI*2); ctx.fill(); } ctx.fillStyle="#fff1a8"; ctx.beginPath(); ctx.arc(0,0,s*0.4,0,Math.PI*2); ctx.fill(); }
+
+function drawBackground() {
+  if (!T) { himmel("#d9c8ff","#ffe3f4"); return; }
+  himmel(T.bgTop, T.bgBottom);
+  const now = performance.now();
+  if (T.sterneDeko) {
+    for (let n of nebel){ const g=ctx.createRadialGradient(n.x,n.y,10,n.x,n.y,n.r); g.addColorStop(0,n.c); g.addColorStop(1,"rgba(0,0,0,0)"); ctx.fillStyle=g; ctx.beginPath(); ctx.arc(n.x,n.y,n.r,0,Math.PI*2); ctx.fill(); }
+    const tw = now/600;
+    for (let s of bgSterne){ ctx.globalAlpha = 0.4+0.6*Math.abs(Math.sin(tw+s.t)); ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); }
+    ctx.globalAlpha = 1;
+    // Planet mit Ring + Mond
+    ctx.save(); ctx.translate(78, H-66);
+    const pg=ctx.createRadialGradient(-12,-12,8,0,0,60); pg.addColorStop(0,"#ffc9e0"); pg.addColorStop(1,"#c98fce");
+    ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(0,0,52,0,Math.PI*2); ctx.fill();
+    ctx.strokeStyle="rgba(255,235,250,0.7)"; ctx.lineWidth=6; ctx.beginPath(); ctx.ellipse(0,6,78,20,-0.4,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle="#fff0fa"; ctx.beginPath(); ctx.arc(60,-50,12,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+  } else {
+    // Sonne mit Halo
+    ctx.save(); ctx.translate(W-78, 78);
+    const sg=ctx.createRadialGradient(0,0,8,0,0,70); sg.addColorStop(0,"rgba(255,247,190,0.9)"); sg.addColorStop(1,"rgba(255,247,190,0)");
+    ctx.fillStyle=sg; ctx.beginPath(); ctx.arc(0,0,70,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#fff4b0"; ctx.beginPath(); ctx.arc(0,0,34,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    // Wolken (Parallax)
+    for (let c of wolken) wolke(c.x, c.y, c.s);
+    // zwei Hügel-Ebenen
+    ctx.fillStyle="#bdeeb0"; hügel(H*0.40, 0.10);
+    ctx.fillStyle="#97df86"; hügel(H*0.52, 0.16);
+  }
+}
+function wolke(x,y,s){ ctx.save(); ctx.translate(x,y); ctx.scale(s,s); ctx.fillStyle="rgba(255,255,255,0.9)";
+  for (const [dx,dy,r] of [[-26,4,18],[-6,-6,24],[18,2,20],[2,8,16]]) { ctx.beginPath(); ctx.arc(dx,dy,r,0,Math.PI*2); ctx.fill(); }
+  ctx.restore(); }
+function hügel(baseY, amp){ ctx.beginPath(); ctx.moveTo(0,baseY); for(let x=0;x<=W;x+=40){ ctx.lineTo(x, baseY + Math.sin(x*0.01)*H*amp*0.3); } ctx.lineTo(W,H); ctx.lineTo(0,H); ctx.closePath(); ctx.fill(); }
+
+/* ---------- Zeichnen: Objekte ---------- */
+function objSpawnScale(o){ const t=Math.min(1,(performance.now()-o.spawn)/260); return 0.4+0.6*(1-Math.pow(1-t,3)); }
+function drawObjekt(o) {
+  const sc = objSpawnScale(o);
+  if (T.farbModus) { drawFlower(o, sc); return; }
+  ctx.save(); ctx.translate(o.x, o.y); ctx.scale(sc,sc);
+  if (o.kind === "deko") {
+    ctx.fillStyle="#b9b2cf"; ctx.beginPath(); ctx.arc(0,0,o.r*0.8,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#a39bc0"; ctx.beginPath(); ctx.arc(-4,-3,4,0,Math.PI*2); ctx.arc(5,3,3,0,Math.PI*2); ctx.fill();
+    ctx.restore(); return;
+  }
+  const hell = o.kind==="ziel";
+  const blink = hell ? (0.78+0.22*Math.sin(o.phase)) : 1;
+  if (hell) { ctx.shadowColor="#fff0b8"; ctx.shadowBlur=18; ctx.fillStyle="#fff0b8"; }
+  else { ctx.fillStyle="#6a6390"; }
+  ctx.beginPath();
+  for (let i=0;i<10;i++){ const a=(Math.PI/5)*i-Math.PI/2; const r=(i%2===0)?o.r*blink:o.r*0.45*blink; ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r); }
+  ctx.closePath(); ctx.fill();
+  if (!hell) { ctx.shadowBlur=0; ctx.strokeStyle="#8a82ad"; ctx.lineWidth=2; ctx.stroke(); }
+  ctx.restore();
+}
+function drawFlower(o, sc) {
+  const k = Math.sin(o.phase)*2;
+  ctx.save(); ctx.translate(o.x+k, o.y); ctx.scale(sc,sc);
+  ctx.strokeStyle="#7bcf7b"; ctx.lineWidth=4; ctx.lineCap="round";
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(0,o.r+12); ctx.stroke();
+  ctx.fillStyle=o.farbe;
+  for (let i=0;i<6;i++){ const a=(i/6)*Math.PI*2; ctx.beginPath(); ctx.ellipse(Math.cos(a)*o.r*0.6,Math.sin(a)*o.r*0.6,o.r*0.44,o.r*0.44,0,0,Math.PI*2); ctx.fill(); }
+  ctx.fillStyle="#fff6c8"; ctx.beginPath(); ctx.arc(0,0,o.r*0.42,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+function drawNachschub(n) {
+  const bob = Math.sin(n.phase)*3;
+  ctx.save(); ctx.translate(n.x, n.y+bob);
+  if (wahl.welt === "weltraum") {
+    ctx.shadowColor="#bfeaff"; ctx.shadowBlur=14; ctx.fillStyle="#bfeaff";
+    ctx.beginPath(); ctx.moveTo(0,-n.r); ctx.lineTo(n.r*0.8,-n.r*0.2); ctx.lineTo(0,n.r); ctx.lineTo(-n.r*0.8,-n.r*0.2); ctx.closePath(); ctx.fill();
+    ctx.shadowBlur=0; ctx.strokeStyle="#eafaff"; ctx.lineWidth=1.5; ctx.beginPath(); ctx.moveTo(-n.r*0.8,-n.r*0.2); ctx.lineTo(n.r*0.8,-n.r*0.2); ctx.moveTo(0,-n.r); ctx.lineTo(0,n.r); ctx.stroke();
+  } else {
+    ctx.fillStyle="#ff7aa0"; ctx.beginPath(); ctx.moveTo(0,n.r);
+    ctx.bezierCurveTo(n.r*1.3,n.r*0.3,n.r,-n.r,0,-n.r*0.4); ctx.bezierCurveTo(-n.r,-n.r,-n.r*1.3,n.r*0.3,0,n.r); ctx.fill();
+    ctx.fillStyle="#7bd88f"; ctx.beginPath(); ctx.ellipse(0,-n.r*0.5,n.r*0.7,n.r*0.3,0,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#fff0a0"; for(let i=0;i<5;i++){ ctx.beginPath(); ctx.arc(rand(-n.r*0.4,n.r*0.4),rand(-n.r*0.1,n.r*0.5),1.4,0,Math.PI*2); ctx.fill(); }
+  }
+  ctx.restore();
+}
+
+/* ---------- Zeichnen: Gegner ---------- */
+function drawGegner(g) {
+  const wob = Math.sin(performance.now()/200 + g.x*0.05)*2;
+  ctx.save(); ctx.translate(g.x, g.y+wob);
+  if (wahl.welt === "weltraum") {
+    ctx.fillStyle="rgba(190,170,255,0.4)"; ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(40,-12); ctx.lineTo(44,10); ctx.closePath(); ctx.fill();
+    const pg=ctx.createRadialGradient(-5,-5,4,0,0,22); pg.addColorStop(0,"#7a66b0"); pg.addColorStop(1,"#4b3a78");
+    ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(0,0,20,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(-6,-2,5,0,Math.PI*2); ctx.arc(7,-2,5,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#ff8aa0"; ctx.beginPath(); ctx.arc(-5,-1,2.4,0,Math.PI*2); ctx.arc(8,-1,2.4,0,Math.PI*2); ctx.fill();
+  } else {
+    const pg=ctx.createRadialGradient(-4,-6,4,0,0,26); pg.addColorStop(0,"#a87fd6"); pg.addColorStop(1,"#7a52b0");
+    ctx.fillStyle=pg;
+    ctx.beginPath(); ctx.moveTo(-22,6); ctx.bezierCurveTo(-26,-22,26,-22,22,6);
+    for (let i=4;i>=-4;i--){ ctx.lineTo(i*5.5, 12+(i%2===0?0:7)); } ctx.closePath(); ctx.fill();
+    ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(-8,-2,6,0,Math.PI*2); ctx.arc(8,-2,6,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="#3a2a4a"; ctx.beginPath(); ctx.arc(-7,-1,2.6,0,Math.PI*2); ctx.arc(9,-1,2.6,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle="rgba(255,150,180,0.5)"; ctx.beginPath(); ctx.arc(-12,4,3,0,Math.PI*2); ctx.arc(12,4,3,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+/* ---------- Zeichnen: Figur ---------- */
+function drawFigur() {
+  const grow = Math.min(1, (performance.now()-levelStartZeit)/350);
+  const sc = (groesse/26) * (0.5 + 0.5*(1-Math.pow(1-grow,3)));
+  const flip = held.blick, now = performance.now();
+  const bob = Math.sin(now/380)*2.2;
+  const flackern = now < unbesiegbarBis && Math.floor(now/120)%2===0;
+  // weicher Schatten
+  ctx.save(); ctx.globalAlpha=0.18; ctx.fillStyle="#000"; ctx.beginPath(); ctx.ellipse(held.x, held.y+groesse*0.7, groesse*0.7, groesse*0.25, 0,0,Math.PI*2); ctx.fill(); ctx.restore();
+  ctx.save(); ctx.translate(held.x, held.y+bob); ctx.scale(flip*sc, sc);
+  ctx.globalAlpha = flackern ? 0.45 : 1;
+  if (wahl.figur === "drache") drawDrache(now); else drawEinhorn(now);
+  ctx.restore();
+}
+function blush(x1,x2,y){ ctx.fillStyle="rgba(255,150,180,0.45)"; ctx.beginPath(); ctx.arc(x1,y,3,0,Math.PI*2); ctx.arc(x2,y,3,0,Math.PI*2); ctx.fill(); }
+function drawDrache(now) {
+  const wing = Math.sin(held.flap)*10;
+  ctx.fillStyle="#a9d8ff"; ctx.beginPath(); ctx.moveTo(-4,0); ctx.quadraticCurveTo(-30,-20-wing,-34,4-wing*0.4); ctx.quadraticCurveTo(-22,2,-4,8); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle="#7fd6a8"; ctx.lineWidth=6; ctx.lineCap="round"; ctx.beginPath(); ctx.moveTo(-10,8); ctx.quadraticCurveTo(-28,16,-30,2); ctx.stroke();
+  ctx.fillStyle="#7fd6a8"; ctx.beginPath(); ctx.moveTo(-30,-3); ctx.lineTo(-38,2); ctx.lineTo(-30,7); ctx.fill();
+  ctx.fillStyle="#8fe3b4"; ctx.beginPath(); ctx.ellipse(0,6,20,15,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#e8fff2"; ctx.beginPath(); ctx.ellipse(2,10,12,9,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#8fe3b4"; ctx.beginPath(); ctx.ellipse(16,-6,13,12,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(27,-2,6,5,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#6fcf98"; ctx.beginPath(); ctx.moveTo(12,-17); ctx.lineTo(9,-27); ctx.lineTo(17,-18); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(18,-7,4.2,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#1f3a40"; ctx.beginPath(); ctx.arc(19,-7,2.3,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(20,-8,0.9,0,Math.PI*2); ctx.fill();
+  blush(13,24,2);
+  ctx.fillStyle="#b9ecff"; ctx.beginPath(); ctx.moveTo(0,0); ctx.quadraticCurveTo(-18,-26-wing,-10,2-wing*0.5); ctx.quadraticCurveTo(-6,0,0,6); ctx.closePath(); ctx.fill();
+  if (now < effektBis) {
+    ctx.fillStyle="#ffe39a"; ctx.beginPath(); ctx.moveTo(32,-2); ctx.lineTo(54,-6); ctx.lineTo(47,0); ctx.lineTo(56,2); ctx.lineTo(45,5); ctx.lineTo(51,9); ctx.lineTo(32,4); ctx.closePath(); ctx.fill();
+    ctx.fillStyle="#ffb38a"; ctx.beginPath(); ctx.moveTo(32,-1); ctx.lineTo(45,-3); ctx.lineTo(43,2); ctx.lineTo(47,4); ctx.lineTo(32,4); ctx.closePath(); ctx.fill();
+  }
+}
+function drawEinhorn(now) {
+  ctx.fillStyle="#ffffff";
+  ctx.beginPath(); ctx.ellipse(0,6,22,16,0,0,Math.PI*2); ctx.fill();
+  ctx.fillRect(-14,16,6,12); ctx.fillRect(6,16,6,12);
+  ctx.beginPath(); ctx.ellipse(16,-8,12.5,11.5,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(26,-4,6,5,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#ffd98a"; ctx.beginPath(); ctx.moveTo(20,-18); ctx.lineTo(24,-34); ctx.lineTo(27,-17); ctx.closePath(); ctx.fill();
+  const mane=["#ff9aa9","#ffc09a","#ffe39a","#a9e8b8","#9ac1ff","#cdb0ff"];
+  for (let i=0;i<mane.length;i++){ ctx.fillStyle=mane[i]; ctx.beginPath(); ctx.arc(6-i*5,-12+i*3,6,0,Math.PI*2); ctx.fill(); }
+  for (let i=0;i<mane.length;i++){ ctx.fillStyle=mane[i]; ctx.beginPath(); ctx.arc(-22,0+i*3,5,0,Math.PI*2); ctx.fill(); }
+  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(18,-9,3.6,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#4a3a5a"; ctx.beginPath(); ctx.arc(18.6,-9,2.1,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.beginPath(); ctx.arc(19.4,-10,0.8,0,Math.PI*2); ctx.fill();
+  blush(12,23,-1);
+  if (now < effektBis) { ctx.fillStyle="#ff9ec9"; for (let i=0;i<3;i++){ ctx.beginPath(); ctx.arc(30+i*5,-6+i*4,2.5,0,Math.PI*2); ctx.fill(); } }
+}
+
+/* ---------- Effekte zeichnen ---------- */
+function drawEffekte() {
+  for (let r of ringe){ ctx.globalAlpha=(r.leben/r.maxLeben)*0.7; ctx.strokeStyle=r.farbe; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(r.x,r.y,r.r,0,Math.PI*2); ctx.stroke(); }
+  ctx.globalAlpha=1;
+  for (let p of partikel){ ctx.globalAlpha=Math.max(0,p.leben/p.max); ctx.fillStyle=p.farbe; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); }
+  ctx.globalAlpha=1;
+  ctx.font="bold 22px "+bodyFont(); ctx.textAlign="center";
+  for (let p of popups){ ctx.globalAlpha=Math.max(0,p.leben/p.max); ctx.fillStyle=p.farbe; ctx.fillText(p.text,p.x,p.y); }
+  ctx.globalAlpha=1; ctx.textAlign="left";
+  for (let k of konfetti){ ctx.save(); ctx.globalAlpha=Math.min(1,k.leben/40); ctx.translate(k.x,k.y); ctx.rotate(k.rot); ctx.fillStyle=k.c; ctx.fillRect(-k.w/2,-k.h/2,k.w,k.h); ctx.restore(); }
+  ctx.globalAlpha=1;
+}
+
+/* ---------- HUD ---------- */
+function drawHUD() {
+  ctx.fillStyle="rgba(90,74,120,0.55)"; roundRect(12,12,Math.min(W-100,360),64,18); ctx.fill();
+  ctx.save(); ctx.translate(40,44);
+  if (T.farbModus) {
+    for (let i=0;i<6;i++){ const a=(i/6)*Math.PI*2; ctx.fillStyle=zielFarbe; ctx.beginPath(); ctx.arc(Math.cos(a)*9,Math.sin(a)*9,6,0,Math.PI*2); ctx.fill(); }
+    ctx.fillStyle="#fff6c8"; ctx.beginPath(); ctx.arc(0,0,6,0,Math.PI*2); ctx.fill();
+  } else { ctx.fillStyle="#fff0b8"; sternPfad(12); ctx.fill(); }
+  ctx.restore();
+  ctx.fillStyle="#fff"; ctx.font="bold 22px "+bodyFont(); ctx.textBaseline="middle";
+  const wort = T.farbModus ? (zielFarbName+" Blumen") : "Sterne";
+  ctx.fillText(wort+": "+fortschritt+" / "+ziel, 64, 36);
+  ctx.font="15px "+bodyFont(); ctx.fillStyle="#efe7ff";
+  ctx.fillText("Level "+(levelIndex+1)+" / "+levelPlan.length, 64, 60);
+
+  const bw=Math.min(W-40,300), bx=20, by=H-34;
+  ctx.fillStyle="rgba(90,74,120,0.55)"; roundRect(bx-6,by-22,bw+12,34,16); ctx.fill();
+  ctx.fillStyle="rgba(255,255,255,0.3)"; roundRect(bx,by-12,bw,16,8); ctx.fill();
+  const mg=ctx.createLinearGradient(bx,0,bx+bw,0); mg.addColorStop(0,T.ressFarbe1); mg.addColorStop(1,T.ressFarbe2);
+  ctx.fillStyle=mg; roundRect(bx,by-12,bw*(ressource/100),16,8); ctx.fill();
+  ctx.fillStyle="#fff"; ctx.font="bold 15px "+bodyFont(); ctx.textBaseline="alphabetic"; ctx.fillText(T.ressName,bx,by-16);
+}
+function roundRect(x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+function bodyFont(){ return '"Comic Sans MS","Chalkboard SE",system-ui,sans-serif'; }
+
+/* ---------- Hauptzeichnung ---------- */
+function draw() {
+  if (state==="menu" || state==="settings") { drawMenuScene(); return; }
+  drawBackground();
+  for (let n of nachschub) drawNachschub(n);
+  for (let o of objekte) drawObjekt(o);
+  for (let g of gegnerListe) drawGegner(g);
+  drawFigur();
+  drawEffekte();
+  if (state==="playing") drawHUD();
+}
+function loop(){ try { update(); updateEffekte(); draw(); } catch(e){ console.error(e); } requestAnimationFrame(loop); }
+
+/* ---------- Menü-Logik ---------- */
+function show(id){ document.getElementById(id).classList.remove("hidden"); }
+function hide(id){ document.getElementById(id).classList.add("hidden"); }
+function hideAll(){ ["menu","settings","levelScreen","winScreen"].forEach(hide); }
+function markiere(){ document.querySelectorAll(".choice").forEach(b=>{ b.classList.toggle("sel", wahl[b.getAttribute("data-group")]===b.getAttribute("data-val")); }); document.getElementById("lvlVal").textContent=wahl.anzahlLevel; }
+
+document.querySelectorAll(".choice").forEach(b=>{ b.addEventListener("click",()=>{ wahl[b.getAttribute("data-group")]=b.getAttribute("data-val"); markiere(); }); });
+document.getElementById("lvlMinus").addEventListener("click",()=>{ wahl.anzahlLevel=Math.max(1,wahl.anzahlLevel-1); markiere(); });
+document.getElementById("lvlPlus").addEventListener("click",()=>{ wahl.anzahlLevel=Math.min(10,wahl.anzahlLevel+1); markiere(); });
+document.getElementById("settingsBtn").addEventListener("click",()=>{ state="settings"; hideAll(); show("settings"); });
+document.getElementById("settingsBack").addEventListener("click",()=>{ state="menu"; hideAll(); show("menu"); });
+document.getElementById("playBtn").addEventListener("click",()=>{ gesammelteSterne=0; maxSterne=0; baueLevelPlan(); startLevel(0); });
+document.getElementById("nextBtn").addEventListener("click",()=>startLevel(levelIndex+1));
+document.getElementById("againBtn").addEventListener("click",()=>gotoMenu());
+document.getElementById("menuBtn").addEventListener("click",()=>gotoMenu());
+
+/* ---------- Start ---------- */
+window.addEventListener("resize", resize);
+resize(); markiere(); loop();
+</script>
+</body>
+</html>
